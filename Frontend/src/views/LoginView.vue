@@ -1,20 +1,20 @@
 <script setup>
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { login } from '../services/auth';
+import { ref } from "vue";
+import { useRouter } from "vue-router";
+import { login } from "../services/auth";
 
 const router = useRouter();
-const username = ref('demo');
-const password = ref('demo123');
-const error = ref('');
+const username = ref("demo");
+const password = ref("demo123");
+const error = ref("");
 const loading = ref(false);
 
 async function onSubmit() {
-  error.value = '';
+  error.value = "";
   loading.value = true;
   try {
     await login(username.value, password.value);
-    router.push('/');
+    router.push("/");
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -24,99 +24,50 @@ async function onSubmit() {
 </script>
 
 <template>
-  <main class="login-page">
-    <form class="card" @submit.prevent="onSubmit"> 
-      <h1>Energy Monitor</h1>
-      <p class="hint">Sign in to view live meter data</p>
+  <main class="min-h-screen grid place-items-center p-6">
+    <form
+      class="w-full max-w-95 bg-card border border-border rounded-2xl p-7 flex flex-col gap-3.5 shadow-xl"
+      @submit.prevent="onSubmit"
+    >
+      <h1 class="text-2xl font-bold text-text m-0">Energy Monitor</h1>
+      <p class="text-sm text-muted m-0">Sign in to view live meter data</p>
 
-      <label>
+      <label class="flex flex-col gap-1.5 text-sm text-muted">
         Username
-        <input v-model="username" type="text" autocomplete="username" required />
+        <input
+          v-model="username"
+          type="text"
+          autocomplete="username"
+          required
+          class="bg-bg text-text border border-border rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition duration-150"
+        />
       </label>
 
-      <label>
+      <label class="flex flex-col gap-1.5 text-sm text-muted">
         Password
-        <input v-model="password" type="password" autocomplete="current-password" required />
+        <input
+          v-model="password"
+          type="password"
+          autocomplete="current-password"
+          required
+          class="bg-bg text-text border border-border rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition duration-150"
+        />
       </label>
 
-      <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="error" class="text-sm text-danger m-0">{{ error }}</p>
 
-      <button type="submit" :disabled="loading">
-        {{ loading ? 'Signing in…' : 'Sign in' }}
+      <button
+        type="submit"
+        :disabled="loading"
+        class="bg-accent text-[#062014] border-0 rounded-lg p-2.5 font-semibold cursor-pointer hover:brightness-110 disabled:opacity-70 disabled:cursor-not-allowed transition duration-150"
+      >
+        {{ loading ? "Signing in…" : "Sign in" }}
       </button>
 
-      <p class="demo">Demo account: <code>demo</code> / <code>demo123</code></p>
+      <p class="text-sm text-muted m-0">
+        Demo account: <code class="text-accent font-mono">demo</code> /
+        <code class="text-accent font-mono">demo123</code>
+      </p>
     </form>
   </main>
 </template>
-
-<style scoped>
-.login-page {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-}
-
-.card {
-  width: min(100%, 380px);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 28px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-h1 {
-  margin: 0;
-  font-size: 1.5rem;
-}
-
-.hint,
-.demo {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-input {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-
-button {
-  background: var(--accent);
-  color: #062014;
-  border: 0;
-  border-radius: 8px;
-  padding: 11px;
-  font-weight: 600;
-}
-
-button:disabled {
-  opacity: 0.7;
-}
-
-.error {
-  margin: 0;
-  color: var(--danger);
-  font-size: 0.9rem;
-}
-
-code {
-  color: var(--accent);
-}
-</style>

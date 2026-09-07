@@ -1,3 +1,16 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0f1419;
+  --color-card: #1a2332;
+  --color-border: #2a3648;
+  --color-text: #e8eef4;
+  --color-muted: #8b9bb4;
+  --color-accent: #3dd68c;
+  --color-accent-dim: rgba(61, 214, 140, 0.15);
+  --color-danger: #f07178;
+}
+
 :root {
   --bg: #0f1419;
   --card: #1a2332;
