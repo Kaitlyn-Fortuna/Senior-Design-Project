@@ -9,8 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@lucide/vue": "^1.42.0",
+    "@lucide/vue": "^1.43.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@unovis/ts": "^1.6.7",
+    "@unovis/vue": "^1.6.7",
     "@vueuse/core": "^14.4.0",
     "chart.js": "^4.4.7",
     "class-variance-authority": "^0.7.1",
