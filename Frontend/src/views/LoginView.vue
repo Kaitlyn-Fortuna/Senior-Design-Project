@@ -1,20 +1,34 @@
 <script setup>
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { login } from '../services/auth';
+import { ref } from "vue";
+import { useRouter } from "vue-router";
+import { login } from "../services/auth";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Spinner } from "@/components/ui/spinner";
+import { AlertCircleIcon } from "@lucide/vue";
 
 const router = useRouter();
-const username = ref('demo');
-const password = ref('demo123');
-const error = ref('');
+const username = ref("demo");
+const password = ref("demo123");
+const error = ref("");
 const loading = ref(false);
 
 async function onSubmit() {
-  error.value = '';
+  error.value = "";
   loading.value = true;
   try {
     await login(username.value, password.value);
-    router.push('/');
+    router.push("/");
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -24,99 +38,68 @@ async function onSubmit() {
 </script>
 
 <template>
-  <main class="login-page">
-    <form class="card" @submit.prevent="onSubmit"> 
-      <h1>Energy Monitor</h1>
-      <p class="hint">Sign in to view live meter data</p>
+  <main class="min-h-screen flex items-center justify-center p-6 bg-background">
+    <Card class="w-full max-w-sm shadow-lg">
+      <CardHeader>
+        <CardTitle class="text-2xl font-bold">Energy Monitor</CardTitle>
+        <CardDescription>Sign in to view live meter data</CardDescription>
+      </CardHeader>
 
-      <label>
-        Username
-        <input v-model="username" type="text" autocomplete="username" required />
-      </label>
+      <form @submit.prevent="onSubmit">
+        <CardContent class="flex flex-col gap-4 pb-4">
+          <Alert v-if="error" variant="destructive">
+            <AlertCircleIcon />
+            <AlertTitle>Authentication Failed</AlertTitle>
+            <AlertDescription>{{ error }}</AlertDescription>
+          </Alert>
 
-      <label>
-        Password
-        <input v-model="password" type="password" autocomplete="current-password" required />
-      </label>
+          <FieldGroup>
+            <Field :data-invalid="Boolean(error)">
+              <FieldLabel for="username">Username</FieldLabel>
+              <Input
+                id="username"
+                v-model="username"
+                type="text"
+                autocomplete="username"
+                required
+                :aria-invalid="Boolean(error)"
+              />
+            </Field>
 
-      <p v-if="error" class="error">{{ error }}</p>
+            <Field :data-invalid="Boolean(error)">
+              <FieldLabel for="password">Password</FieldLabel>
+              <Input
+                id="password"
+                v-model="password"
+                type="password"
+                autocomplete="current-password"
+                required
+                :aria-invalid="Boolean(error)"
+              />
+            </Field>
+          </FieldGroup>
 
-      <button type="submit" :disabled="loading">
-        {{ loading ? 'Signing in…' : 'Sign in' }}
-      </button>
+          <p class="text-xs text-muted-foreground">
+            Demo account:
+            <code
+              class="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground"
+              >demo</code
+            >
+            /
+            <code
+              class="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground"
+              >demo123</code
+            >
+          </p>
+        </CardContent>
 
-      <p class="demo">Demo account: <code>demo</code> / <code>demo123</code></p>
-    </form>
+        <CardFooter class="pt-4">
+          <Button type="submit" class="w-full" :disabled="loading">
+            <Spinner v-if="loading" data-icon="inline-start" />
+            {{ loading ? "Signing in…" : "Sign in" }}
+          </Button>
+        </CardFooter>
+      </form>
+    </Card>
   </main>
 </template>
-
-<style scoped>
-.login-page {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-}
-
-.card {
-  width: min(100%, 380px);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 28px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-h1 {
-  margin: 0;
-  font-size: 1.5rem;
-}
-
-.hint,
-.demo {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-
-input {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-
-button {
-  background: var(--accent);
-  color: #062014;
-  border: 0;
-  border-radius: 8px;
-  padding: 11px;
-  font-weight: 600;
-}
-
-button:disabled {
-  opacity: 0.7;
-}
-
-.error {
-  margin: 0;
-  color: var(--danger);
-  font-size: 0.9rem;
-}
-
-code {
-  color: var(--accent);
-}
-</style>
