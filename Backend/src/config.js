@@ -20,4 +20,10 @@ export const config = {
     path: process.env.SERIAL_PORT || '',
     baudRate: Number(process.env.SERIAL_BAUD) || 9600,
   },
+  auth0: {
+    domain: process.env.AUTH0_DOMAIN || '',
+    clientID: process.env.AUTH0_CLIENT_ID || '',
+    clientSecret: process.env.AUTH0_CLIENT_SECRET || '',
+    callbackURL: process.env.AUTH0_CALLBACK_URL || '/auth/oauth2/redirect',
+  },
 };

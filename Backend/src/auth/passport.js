@@ -1,39 +1,28 @@
-import passport from 'passport';
-import { Strategy as LocalStrategy } from 'passport-local';
-import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
-import bcrypt from 'bcryptjs';
-import { config } from '../config.js';
-import { findByUsername, findById } from './users.js';
+import { Strategy as OpenIDConnectStrategy } from 'passport-openidconnect';
+import { findOrCreateFromAuth0 } from './users.js'; // Auth0
 
 export function setupPassport() {
-  passport.use(
-    new LocalStrategy((username, password, done) => {
-      const user = findByUsername(username);
-      if (!user) {
-        return done(null, false, { message: 'Invalid username' });
-      }
-      if (!bcrypt.compareSync(password, user.passwordHash)) {
-        return done(null, false, { message: 'Invalid password' });
-      }
-      return done(null, { id: user.id, username: user.username });
-    }),
-  );
+  // ...existing LocalStrategy and JwtStrategy...
 
   passport.use(
-    new JwtStrategy(
+    new OpenIDConnectStrategy(
       {
-        jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-        secretOrKey: config.jwtSecret,
+        issuer: `https://${config.auth0.domain}/`,
+        authorizationURL: `https://${config.auth0.domain}/authorize`,
+        tokenURL: `https://${config.auth0.domain}/oauth/token`,
+        userInfoURL: `https://${config.auth0.domain}/userinfo`,
+        clientID: config.auth0.clientID,
+        clientSecret: config.auth0.clientSecret,
+        callbackURL: config.auth0.callbackURL,
+        scope: ['profile', 'email'],
       },
-      (payload, done) => {
-        const user = findById(payload.id).then((user) => {
-          if (user) {
-            return done(null, { id: user.id, username: user.username });
-          }
-          return done(null, false);
-        }).catch((err) => {
-          return done(err, false);
-        });
+      (issuer, profile, done) => {
+        try {
+          const user = findOrCreateFromAuth0(profile);
+          return done(null, { id: user.id, username: user.username });
+        } catch (err) {
+          return done(err);
+        }
       },
     ),
   );
