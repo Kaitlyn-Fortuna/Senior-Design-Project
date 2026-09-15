@@ -197,7 +197,7 @@ const donutTriggers = {
           </ChartContainer>
         </CardContent>
         <CardFooter class="mt-auto">
-          <Button variant="outline" class="w-full">
+          <Button variant="outline" class="w-full" @click="router.push('/details')">
             View Details
           </Button>
         </CardFooter>
