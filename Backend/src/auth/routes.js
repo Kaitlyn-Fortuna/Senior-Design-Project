@@ -6,6 +6,15 @@ import { config } from '../config.js';
 
 const router = Router();
 
+function issueTokenResponse(req, res) {
+  const token = jwt.sign(
+    { id: req.user.id, username: req.user.username },
+    config.jwtSecret,
+    { expiresIn: config.jwtExpiresIn },
+  );
+  return res.json({ token, user: req.user });
+}
+
 router.post('/login', (req, res, next) => {
   passport.authenticate('local', { session: false }, (err, user, info) => {
     if (err) {
@@ -29,36 +38,62 @@ router.get('/me', passport.authenticate('jwt', { session: false }), (req, res) =
   res.json({ user: req.user });
 });
 
-// Auth0 routes need a session only to hold OIDC state/nonce during the
-// redirect round-trip. Scoped to /auth so the rest of the API stays stateless.
-router.use(
-  '/auth',
+// --- OAuth2/OIDC sub-router ---
+// Session is scoped to just these routes: it only exists to hold state &
+// nonce during the redirect round-trip with Auth0/Google/Facebook, so it
+// has no business being attached to /login or /me above.
+const oauthRouter = Router();
+
+oauthRouter.use(
   session({
-    secret: config.jwtSecret,
+    secret: config.sessionSecret,
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 5 * 60 * 1000 }, // only needs to survive the redirect
+    cookie: {
+      maxAge: 5 * 60 * 1000, // only needs to survive the redirect
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax', // must survive the top-level redirect back from the provider
+    },
   }),
 );
 
-router.get('/auth/login', passport.authenticate('openidconnect'));
+// Auth0
+oauthRouter.get('/auth0/login', passport.authenticate('openidconnect'));
 
-router.get(
-  '/auth/oauth2/redirect',
-  passport.authenticate('openidconnect', { session: false, failureRedirect: '/login' }),
-  (req, res) => {
-    // req.user is the { id, username } object returned by the
-    // OpenIDConnectStrategy verify callback in passport.js
-    const token = jwt.sign(
-      { id: req.user.id, username: req.user.username },
-      config.jwtSecret,
-      { expiresIn: config.jwtExpiresIn },
-    );
-
-    return res.json({ token, user: req.user });
-    // Alternatively, redirect to your frontend with the token:
-    // return res.redirect(`${config.corsOrigin}/auth/callback?token=${token}`);
-  },
+oauthRouter.get(
+  '/auth0/callback',
+  passport.authenticate('openidconnect', {
+    session: false,
+    failureRedirect: '/login?error=oauth_failed',
+  }),
+  issueTokenResponse,
 );
+
+// Google
+oauthRouter.get('/google', passport.authenticate('google'));
+
+oauthRouter.get(
+  '/google/callback',
+  passport.authenticate('google', {
+    session: false,
+    failureRedirect: '/login?error=oauth_failed',
+  }),
+  issueTokenResponse,
+);
+
+// Facebook
+oauthRouter.get('/facebook', passport.authenticate('facebook'));
+
+oauthRouter.get(
+  '/facebook/callback',
+  passport.authenticate('facebook', {
+    session: false,
+    failureRedirect: '/login?error=oauth_failed',
+  }),
+  issueTokenResponse,
+);
+
+router.use(oauthRouter);
 
 export default router;
