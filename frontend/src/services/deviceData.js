@@ -1,11 +1,29 @@
-export const DEFAULT_DEVICES = [
-  { key: "hvac", label: "HVAC / Air Conditioning", color: "var(--chart-1)", baseUsage: 2.2, variance: 0.8 },
-  { key: "waterHeater", label: "Water Heater", color: "var(--chart-2)", baseUsage: 1.2, variance: 0.6 },
-  { key: "refrigerator", label: "Refrigerator", color: "var(--chart-3)", baseUsage: 0.25, variance: 0.1 },
-  { key: "oven", label: "Oven & Stove", color: "var(--chart-4)", baseUsage: 0.5, variance: 0.4 },
-  { key: "washer", label: "Washing Machine", color: "var(--chart-5)", baseUsage: 0.3, variance: 0.3 },
-  { key: "dishwasher", label: "Dishwasher", color: "oklch(0.68 0.16 160)", baseUsage: 0.2, variance: 0.2 },
+import { getPortDisplayName } from "./portConfig";
+
+/**
+ * Test data configurations mapped to input ports 0 through 5 in order.
+ */
+export const TEST_PORT_CONFIGS = [
+  { port: 0, key: "port0", color: "var(--chart-1)", baseUsage: 2.2, variance: 0.8 },
+  { port: 1, key: "port1", color: "var(--chart-2)", baseUsage: 1.2, variance: 0.6 },
+  { port: 2, key: "port2", color: "var(--chart-3)", baseUsage: 0.25, variance: 0.1 },
+  { port: 3, key: "port3", color: "var(--chart-4)", baseUsage: 0.5, variance: 0.4 },
+  { port: 4, key: "port4", color: "var(--chart-5)", baseUsage: 0.3, variance: 0.3 },
+  { port: 5, key: "port5", color: "oklch(0.68 0.16 160)", baseUsage: 0.2, variance: 0.2 },
 ];
+
+/**
+ * Resolves test devices with current saved port display names.
+ * Defaults to "Port N" if no name has been saved or if blank.
+ */
+export function getDevices() {
+  return TEST_PORT_CONFIGS.map((config) => ({
+    ...config,
+    label: getPortDisplayName(config.port),
+  }));
+}
+
+export const DEFAULT_DEVICES = getDevices();
 
 export const LOOKBACK_OPTIONS = [
   { value: "12h", label: "12 hours", hours: 12 },

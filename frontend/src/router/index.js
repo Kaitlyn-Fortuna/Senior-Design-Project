@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import LoginView from '../views/LoginView.vue';
 import DashboardView from '../views/DashboardView.vue';
 import DetailView from '../views/DetailView.vue';
+import SetupView from '../views/SetupView.vue';
 import { getToken } from '../services/auth';
 
 const router = createRouter({
@@ -10,6 +11,7 @@ const router = createRouter({
     { path: '/login', component: LoginView },
     { path: '/', component: DashboardView, meta: { requiresAuth: true } },
     { path: '/details', component: DetailView, meta: { requiresAuth: true } },
+    { path: '/setup', component: SetupView, meta: { requiresAuth: true } },
   ],
 });
 
