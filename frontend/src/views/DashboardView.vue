@@ -1,8 +1,10 @@
 <script setup>
-import { computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { getUser, logout } from "../services/auth";
+import { getPortDisplayName } from "@/services/portConfig";
 import { Button } from "@/components/ui/button";
+import { SettingsIcon } from "@lucide/vue";
 import {
   Card,
   CardContent,
@@ -98,24 +100,39 @@ const powerData = [
   { hour: 47, formattedTime: "Day 2, 11:00 PM", label: "11 PM", power: 1.32 },
 ];
 
-// Device energy consumption data (24-hour period, total: 25.0 kWh)
-const deviceData = [
-  { device: "HVAC / Air Conditioning", usage: 10.0, percent: 40, color: "var(--chart-1)" },
-  { device: "Water Heater", usage: 4.25, percent: 17, color: "var(--chart-2)" },
-  { device: "Refrigerator", usage: 3.25, percent: 13, color: "var(--chart-3)" },
-  { device: "Oven & Stove", usage: 2.75, percent: 11, color: "var(--chart-4)" },
-  { device: "Washing Machine", usage: 2.5, percent: 10, color: "var(--chart-5)" },
-  { device: "Dishwasher", usage: 2.25, percent: 9, color: "oklch(0.68 0.16 160)" },
+// Test device energy consumption data mapped to ports 0-5 in order (24-hour period, total: 25.0 kWh)
+const testPortMetrics = [
+  { port: 0, usage: 10.0, percent: 40, color: "var(--chart-1)" },
+  { port: 1, usage: 4.25, percent: 17, color: "var(--chart-2)" },
+  { port: 2, usage: 3.25, percent: 13, color: "var(--chart-3)" },
+  { port: 3, usage: 2.75, percent: 11, color: "var(--chart-4)" },
+  { port: 4, usage: 2.5, percent: 10, color: "var(--chart-5)" },
+  { port: 5, usage: 2.25, percent: 9, color: "oklch(0.68 0.16 160)" },
 ];
 
-const deviceChartConfig = {
-  hvac: { label: "HVAC / Air Conditioning", color: "var(--chart-1)" },
-  waterHeater: { label: "Water Heater", color: "var(--chart-2)" },
-  refrigerator: { label: "Refrigerator", color: "var(--chart-3)" },
-  oven: { label: "Oven & Stove", color: "var(--chart-4)" },
-  washer: { label: "Washing Machine", color: "var(--chart-5)" },
-  dishwasher: { label: "Dishwasher", color: "oklch(0.68 0.16 160)" },
-};
+function buildDeviceData() {
+  return testPortMetrics.map((item) => ({
+    ...item,
+    device: getPortDisplayName(item.port),
+  }));
+}
+
+const deviceData = ref(buildDeviceData());
+
+onMounted(() => {
+  deviceData.value = buildDeviceData();
+});
+
+const deviceChartConfig = computed(() => {
+  const config = {};
+  deviceData.value.forEach((item) => {
+    config[`port${item.port}`] = {
+      label: item.device,
+      color: item.color,
+    };
+  });
+  return config;
+});
 
 // Tooltip trigger for Donut / Pie chart segments
 const donutTriggers = {
@@ -149,7 +166,13 @@ const donutTriggers = {
           <span v-if="user"> · {{ user.username }}</span>
         </p>
       </div>
-      <Button variant="outline" @click="onLogout"> Log out </Button>
+      <div class="flex items-center gap-2">
+        <Button variant="outline" @click="router.push('/setup')">
+          <SettingsIcon data-icon="inline-start" />
+          Setup
+        </Button>
+        <Button variant="outline" @click="onLogout"> Log out </Button>
+      </div>
     </header>
 
     <main class="flex flex-wrap gap-6">

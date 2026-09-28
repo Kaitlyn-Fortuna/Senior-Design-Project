@@ -1,9 +1,9 @@
 <script setup>
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { getUser } from "@/services/auth";
 import {
-  DEFAULT_DEVICES,
+  getDevices,
   LOOKBACK_OPTIONS,
   generateTimeSeriesData,
 } from "@/services/deviceData";
@@ -55,8 +55,12 @@ import {
 const router = useRouter();
 const user = getUser();
 
-// Devices list - dynamic and ready for API data
-const devices = ref(DEFAULT_DEVICES);
+// Devices list - dynamic and loaded with saved port names (ports 0-5)
+const devices = ref(getDevices());
+
+onMounted(() => {
+  devices.value = getDevices();
+});
 
 // Lookback filter state (default 48 hours)
 const selectedRange = ref("48h");
