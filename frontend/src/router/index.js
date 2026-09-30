@@ -9,6 +9,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: LoginView },
+    { path: '/register', component: LoginView },
     { path: '/', component: DashboardView, meta: { requiresAuth: true } },
     { path: '/details', component: DetailView, meta: { requiresAuth: true } },
     { path: '/setup', component: SetupView, meta: { requiresAuth: true } },
@@ -19,7 +20,7 @@ router.beforeEach((to) => {
   if (to.meta.requiresAuth && !getToken()) {
     return '/login';
   }
-  if (to.path === '/login' && getToken()) {
+  if ((to.path === '/login' || to.path === '/register') && getToken()) {
     return '/';
   }
 });
