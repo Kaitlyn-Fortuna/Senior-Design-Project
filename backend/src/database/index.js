@@ -1,6 +1,10 @@
 import { Pool } from 'pg'
  
-const pool = new Pool()
+const pool = new Pool({
+  user: 'postgres',
+  password: 'temporaryPassword',
+  host: 'localhost'
+})
  
 export const query = async (text, params) => {
   const start = Date.now()
