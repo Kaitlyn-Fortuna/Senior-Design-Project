@@ -7,6 +7,8 @@ export const badgeVariants = cva(
   {
     variants: {
       variant: {
+        connected: "bg-green-500 text-white",
+        disconnected: 'bg-red-500 text-black',
         default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
         secondary:
           "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",

@@ -1,3 +1,5 @@
+import { disconnectSocket } from "./socket";
+
 const TOKEN_KEY = 'em_token';
 const USER_KEY = 'em_user';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -32,6 +34,7 @@ export async function login(username, password) {
 }
 
 export function logout() {
+  disconnectSocket();
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
 }

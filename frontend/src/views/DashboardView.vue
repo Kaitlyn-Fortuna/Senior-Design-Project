@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { getUser, logout } from "../services/auth";
 import { getPortDisplayName } from "@/services/portConfig";
@@ -29,7 +29,8 @@ import {
   VisTooltip,
   VisXYContainer,
 } from "@unovis/vue";
-
+import { connectSocket, disconnectSocket } from "../services/socket";
+import { Badge } from "@/components/ui/badge"
 const router = useRouter();
 const user = getUser();
 
@@ -153,6 +154,26 @@ const donutTriggers = {
     `;
   },
 };
+
+const connected = ref(false);
+onMounted(() => {
+  const socket = connectSocket();
+  
+  connected.value = socket.connected;
+
+  socket.on("connect", () => {
+    connected.value = true
+  });
+  socket.on("disconnect", () => {
+    connected.value = false
+  })
+  socket.on("connect_error", (error) => {
+    console.error("Socket error", error)
+  })
+})
+onUnmounted(() => {
+  disconnectSocket();
+})
 </script>
 
 <template>
@@ -161,8 +182,10 @@ const donutTriggers = {
       <div>
         <h1 class="text-2xl font-bold text-foreground m-0">Energy Monitor</h1>
         <p
-          class="mt-1.5 text-sm text-muted-foreground flex items-center gap-2 m-0"
-        >
+          class="mt-1.5 text-sm text-muted-foreground flex items-center gap-2 m-0">
+          <Badge :variant = "connected ? 'connected' : 'disconnected'"">
+            {{connected ? "Connected" : "Disconnected"}}
+          </Badge>
           <span v-if="user"> · {{ user.username }}</span>
         </p>
       </div>
