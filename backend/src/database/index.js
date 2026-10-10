@@ -5,7 +5,8 @@ const pool = new Pool({
   password: 'temporaryPassword',
   host: 'localhost'
 })
- 
+
+//Code here from the node-pg documentation
 export const query = async (text, params) => {
   const start = Date.now()
   const res = await pool.query(text, params)
