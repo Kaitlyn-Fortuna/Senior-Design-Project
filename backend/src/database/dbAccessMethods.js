@@ -30,3 +30,49 @@ export const insertRecord = async (currents = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vo
     //return
     return result;
 }
+
+export const retrieveRecordByPKey = async (pKeyInt) =>{
+    const query = {
+        text: 'SELECT * FROM powerdata WHERE pkey = $1',
+        values: [pKeyInt]
+    };
+
+    //do the query
+    const result = await db.query(query);
+
+    //print resulting row to console
+    console.log(result.rows[0]);
+
+    //return
+    return result;
+}
+
+export const retrieveNewestRecord = async () =>{
+    const query = {
+        text: 'SELECT * FROM powerdata ORDER BY tstamp DESC LIMIT 1'
+    };
+
+    //do the query
+    const result = await db.query(query);
+
+    //print resulting row to console
+    console.log(result.rows[0]);
+
+    //return
+    return result;
+}
+
+export const retrieveAllRecords = async () =>{
+    const query = {
+        text: 'SELECT * FROM powerdata'
+    };
+
+    //do the query
+    const result = await db.query(query);
+
+    //print resulting row to console
+    console.log(result.rows[0]);
+
+    //return
+    return result;
+}
