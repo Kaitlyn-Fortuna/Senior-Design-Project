@@ -156,23 +156,35 @@ const donutTriggers = {
 };
 
 const connected = ref(false);
+let socket = null;
+
+function socketConnect() {
+  connected.value = true;
+}
+function socketDisconnect() {
+  connected.value = false;
+}
+function socketConnectionError(error) {
+  console.error("Socket error", error.message)
+}
 onMounted(() => {
-  const socket = connectSocket();
+  socket = connectSocket();
   
   connected.value = socket.connected;
 
-  socket.on("connect", () => {
-    connected.value = true
-  });
-  socket.on("disconnect", () => {
-    connected.value = false
-  })
-  socket.on("connect_error", (error) => {
-    console.error("Socket error", error)
-  })
+  socket.on("connect", socketConnect);
+  socket.on("disconnect", socketDisconnect);
+  socket.on("connect_error", socketConnectionError);
+
 })
+
+
 onUnmounted(() => {
-  disconnectSocket();
+  if (socket) {
+    socket.off("connect", socketConnect);
+    socket.off("disconnect", socketDisconnect);
+    socket.off("connect_error", socketConnectionError);
+  }
 })
 </script>
 
