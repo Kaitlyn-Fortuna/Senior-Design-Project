@@ -10,6 +10,14 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me-eventually',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  frontendUrl: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'http://localhost:5173',
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+    callbackUrl:
+      process.env.GOOGLE_CALLBACK_URL ||
+      'http://localhost:3000/api/auth/google/callback',
+  },
   influx: {
     url: process.env.INFLUX_URL || '',
     token: process.env.INFLUX_TOKEN || '',
