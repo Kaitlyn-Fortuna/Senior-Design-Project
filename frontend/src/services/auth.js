@@ -1,6 +1,12 @@
 const TOKEN_KEY = 'em_token';
 const USER_KEY = 'em_user';
+const OAUTH_ERROR_KEY = 'em_oauth_error';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+const OAUTH_ERRORS = {
+  google: 'Google sign-in failed or was cancelled. Please try again.',
+  google_not_configured: 'Google sign-in is not configured on the server.',
+};
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
@@ -42,13 +48,8 @@ export function logout() {
  * BACKEND IMPLEMENTATION REQUIRED:
  * - Endpoint: POST /api/auth/register
  * - Body: { username, email, password }
- * - Backend tasks:
- *   1. Validate inputs (valid email, password length >= 8, username alphanumeric).
- *   2. Verify username and email are unique in the database.
- *   3. Hash password using bcrypt or argon2 (e.g. bcrypt.hash(password, 10)).
- *   4. Persist user to DB.
- *   5. Return JWT token and user info: { token, user: { id, username, email } }.
- *   6. Status codes: 201 Created on success, 400 Bad Request, 409 Conflict if duplicate.
+ * - Returns: { token, user: { id, username, email } }
+ * - Status codes: 201 Created, 400 Bad Request, 409 Conflict if duplicate.
  */
 export async function register(username, email, password) {
   const response = await fetch(`${API_URL}/api/auth/register`, {
@@ -73,34 +74,52 @@ export async function register(username, email, password) {
 }
 
 /**
- * Initiate Google OAuth authentication.
- *
- * BACKEND IMPLEMENTATION REQUIRED:
- * - Strategy 1 (OAuth2 Redirect flow):
- *   1. Route: GET /api/auth/google -> passport.authenticate('google', { scope: ['profile', 'email'] })
- *   2. Callback: GET /api/auth/google/callback -> passport.authenticate('google', { failureRedirect: '/login' })
- *   3. Backend issues JWT token on callback and redirects to frontend (e.g. /login?token=... or via secure cookie).
- *   4. Requires GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables.
- *
- * - Strategy 2 (Google One-Tap / GIS Client ID token verification):
- *   1. Frontend obtains Google credential JWT token via Google Identity Services button/popup.
- *   2. Route: POST /api/auth/google -> verifies credential using google-auth-library.
- *   3. Backend finds or creates user record and issues JWT session token.
+ * Start Google OAuth. Must be a full-page navigation (not fetch) so the
+ * browser can follow the redirect to Google and back.
  */
-export async function loginWithGoogle() {
-  // Test if endpoint exists before redirecting to prevent unhandled 404 page in dev
-  try {
-    const check = await fetch(`${API_URL}/api/auth/google`, { method: 'HEAD' });
-    if (check.ok || check.status === 302) {
-      window.location.href = `${API_URL}/api/auth/google`;
-      return;
-    }
-  } catch {
-    // Network or server unreachable
-  }
-
-  throw new Error(
-    'Google OAuth backend endpoint (GET /api/auth/google) is not yet implemented.'
-  );
+export function loginWithGoogle() {
+  window.location.href = `${API_URL}/api/auth/google`;
 }
 
+/**
+ * Returns (and clears) the error message left by a failed Google sign-in.
+ * Call it from the login page to display the message.
+ */
+export function consumeOAuthError() {
+  const message = sessionStorage.getItem(OAUTH_ERROR_KEY);
+  sessionStorage.removeItem(OAUTH_ERROR_KEY);
+  return message;
+}
+
+/**
+ * Runs once at startup (from main.js), before the app renders.
+ * Handles the redirect back from the backend: /login?token=... or ?error=...
+ */
+export async function completeOAuthLogin() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token');
+  const error = params.get('error');
+  if (!token && !error) return;
+
+  // Remove the token from the address bar and history right away
+  window.history.replaceState({}, '', window.location.pathname);
+
+  if (error) {
+    sessionStorage.setItem(OAUTH_ERROR_KEY, OAUTH_ERRORS[error] || 'Sign-in failed.');
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json();
+    if (!response.ok || !data.user) throw new Error('bad response');
+
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+    window.location.replace('/'); // change if your dashboard isn't at "/"
+  } catch {
+    sessionStorage.setItem(OAUTH_ERROR_KEY, 'Could not complete Google sign-in.');
+  }
+}
