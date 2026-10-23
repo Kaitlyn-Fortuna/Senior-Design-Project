@@ -1,9 +1,12 @@
 import { Pool } from 'pg'
+import {config} from '../config.js'
  
 const pool = new Pool({
-  user: 'postgres',
-  password: 'temporaryPassword',
-  host: 'localhost'
+  user: config.database.user,
+  password: config.database.password,
+  host: config.database.host,
+  port: config.database.port,
+  database: config.database.database,
 })
 
 //Code here from the node-pg documentation

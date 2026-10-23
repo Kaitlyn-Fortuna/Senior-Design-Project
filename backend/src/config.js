@@ -10,11 +10,15 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me-eventually',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
-  influx: {
-    url: process.env.INFLUX_URL || '',
-    token: process.env.INFLUX_TOKEN || '',
-    org: process.env.INFLUX_ORG || '',
-    bucket: process.env.INFLUX_BUCKET || '',
+  
+  socketTimer: Number(process.env.SOCKET_TIMER) || 1000,
+  
+  database: {
+    user: process.env.PGUSER || 'postgres',
+    password: process.env.PGPASSWORD || 'temporaryPassword',
+    host: process.env.PGHOST || 'localhost',
+    port: Number(process.env.PGPORT) || 5432,
+    database: process.env.PGDATABASE || 'postgres',
   },
   serial: {
     path: process.env.SERIAL_PORT || '',
