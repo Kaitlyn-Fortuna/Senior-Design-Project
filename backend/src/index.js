@@ -5,9 +5,22 @@ import passport from 'passport';
 import { config } from './config.js';
 import { setupPassport } from './auth/passport.js';
 import authRoutes from './auth/routes.js';
+import { Server } from 'socket.io';
+import { initializeSocketHandlers } from './socket/handler.js';
+
 
 const app = express();
 const server = http.createServer(app);
+const io = new Server(server, 
+  {
+    cors: 
+    {
+      origin: config.corsOrigin,
+      credentials: true,
+    },
+  });
+
+initializeSocketHandlers(io);
 
 setupPassport();
 

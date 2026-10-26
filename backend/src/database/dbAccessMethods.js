@@ -56,7 +56,7 @@ export const retrieveNewestRecord = async () =>{
     const result = await db.query(query);
 
     //print resulting row to console
-    console.log(result.rows[0]);
+    //console.log(result.rows[0]);
 
     //return
     return result;
@@ -75,4 +75,20 @@ export const retrieveAllRecords = async () =>{
 
     //return
     return result;
+}
+//limits to 48 records as the chart only shows the newest 48 records
+export const retrieveRecentRecords = async ( limit = 48) => {
+    const safeLimit = Math.min(Math.max(Number(limit) || 48, 1), 200);
+
+    const query = {
+        text: 
+        'SELECT * FROM powerdata ORDER BY tstamp DESC LIMIT $1',
+        values: [safeLimit]
+    };
+
+    //do the query
+    const result = await db.query(query);
+
+    //return in reverse to get
+    return result.rows.reverse();
 }
