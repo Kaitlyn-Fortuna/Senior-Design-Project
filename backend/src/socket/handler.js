@@ -35,7 +35,7 @@ export const initializeSocketHandlers = (io) =>
                 console.log('Sent', recentRecords.length, 'records to client');
             }catch(error){
                 console.error('Error sending readings: ', error);
-                socket.emit('power:error', 'Failed to sending readings to client');
+                socket.emit('power:error', {message:'Failed to send readings to client'});
             }
         }
 
