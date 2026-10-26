@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { getUser, logout } from "../services/auth";
 import { getPortDisplayName } from "@/services/portConfig";
@@ -29,7 +29,8 @@ import {
   VisTooltip,
   VisXYContainer,
 } from "@unovis/vue";
-
+import { connectSocket, disconnectSocket } from "../services/socket";
+import { Badge } from "@/components/ui/badge"
 const router = useRouter();
 const user = getUser();
 
@@ -37,7 +38,6 @@ function onLogout() {
   logout();
   router.push("/login");
 }
-
 // Line chart configuration
 const chartConfig = {
   power: {
@@ -46,82 +46,50 @@ const chartConfig = {
   },
 };
 
-// 48 hours of simulated home power usage data
-const powerData = [
-  // Day 1
-  { hour: 0, formattedTime: "Day 1, 12:00 AM", label: "Day 1 12 AM", power: 0.85 },
-  { hour: 1, formattedTime: "Day 1, 1:00 AM", label: "1 AM", power: 0.78 },
-  { hour: 2, formattedTime: "Day 1, 2:00 AM", label: "2 AM", power: 0.72 },
-  { hour: 3, formattedTime: "Day 1, 3:00 AM", label: "3 AM", power: 0.75 },
-  { hour: 4, formattedTime: "Day 1, 4:00 AM", label: "4 AM", power: 0.82 },
-  { hour: 5, formattedTime: "Day 1, 5:00 AM", label: "5 AM", power: 1.15 },
-  { hour: 6, formattedTime: "Day 1, 6:00 AM", label: "6 AM", power: 2.34 },
-  { hour: 7, formattedTime: "Day 1, 7:00 AM", label: "7 AM", power: 3.65 },
-  { hour: 8, formattedTime: "Day 1, 8:00 AM", label: "8 AM", power: 3.92 },
-  { hour: 9, formattedTime: "Day 1, 9:00 AM", label: "9 AM", power: 2.45 },
-  { hour: 10, formattedTime: "Day 1, 10:00 AM", label: "10 AM", power: 1.82 },
-  { hour: 11, formattedTime: "Day 1, 11:00 AM", label: "11 AM", power: 1.64 },
-  { hour: 12, formattedTime: "Day 1, 12:00 PM", label: "Day 1 12 PM", power: 1.95 },
-  { hour: 13, formattedTime: "Day 1, 1:00 PM", label: "1 PM", power: 1.74 },
-  { hour: 14, formattedTime: "Day 1, 2:00 PM", label: "2 PM", power: 1.58 },
-  { hour: 15, formattedTime: "Day 1, 3:00 PM", label: "3 PM", power: 1.86 },
-  { hour: 16, formattedTime: "Day 1, 4:00 PM", label: "4 PM", power: 2.28 },
-  { hour: 17, formattedTime: "Day 1, 5:00 PM", label: "5 PM", power: 3.42 },
-  { hour: 18, formattedTime: "Day 1, 6:00 PM", label: "6 PM", power: 4.85 },
-  { hour: 19, formattedTime: "Day 1, 7:00 PM", label: "7 PM", power: 4.52 },
-  { hour: 20, formattedTime: "Day 1, 8:00 PM", label: "8 PM", power: 3.78 },
-  { hour: 21, formattedTime: "Day 1, 9:00 PM", label: "9 PM", power: 2.86 },
-  { hour: 22, formattedTime: "Day 1, 10:00 PM", label: "10 PM", power: 1.76 },
-  { hour: 23, formattedTime: "Day 1, 11:00 PM", label: "11 PM", power: 1.24 },
-  // Day 2
-  { hour: 24, formattedTime: "Day 2, 12:00 AM", label: "Day 2 12 AM", power: 0.88 },
-  { hour: 25, formattedTime: "Day 2, 1:00 AM", label: "1 AM", power: 0.76 },
-  { hour: 26, formattedTime: "Day 2, 2:00 AM", label: "2 AM", power: 0.71 },
-  { hour: 27, formattedTime: "Day 2, 3:00 AM", label: "3 AM", power: 0.79 },
-  { hour: 28, formattedTime: "Day 2, 4:00 AM", label: "4 AM", power: 0.86 },
-  { hour: 29, formattedTime: "Day 2, 5:00 AM", label: "5 AM", power: 1.22 },
-  { hour: 30, formattedTime: "Day 2, 6:00 AM", label: "6 AM", power: 2.56 },
-  { hour: 31, formattedTime: "Day 2, 7:00 AM", label: "7 AM", power: 4.12 },
-  { hour: 32, formattedTime: "Day 2, 8:00 AM", label: "8 AM", power: 3.68 },
-  { hour: 33, formattedTime: "Day 2, 9:00 AM", label: "9 AM", power: 2.62 },
-  { hour: 34, formattedTime: "Day 2, 10:00 AM", label: "10 AM", power: 1.91 },
-  { hour: 35, formattedTime: "Day 2, 11:00 AM", label: "11 AM", power: 1.72 },
-  { hour: 36, formattedTime: "Day 2, 12:00 PM", label: "Day 2 12 PM", power: 2.08 },
-  { hour: 37, formattedTime: "Day 2, 1:00 PM", label: "1 PM", power: 1.83 },
-  { hour: 38, formattedTime: "Day 2, 2:00 PM", label: "2 PM", power: 1.62 },
-  { hour: 39, formattedTime: "Day 2, 3:00 PM", label: "3 PM", power: 2.05 },
-  { hour: 40, formattedTime: "Day 2, 4:00 PM", label: "4 PM", power: 2.48 },
-  { hour: 41, formattedTime: "Day 2, 5:00 PM", label: "5 PM", power: 3.96 },
-  { hour: 42, formattedTime: "Day 2, 6:00 PM", label: "6 PM", power: 5.18 },
-  { hour: 43, formattedTime: "Day 2, 7:00 PM", label: "7 PM", power: 4.68 },
-  { hour: 44, formattedTime: "Day 2, 8:00 PM", label: "8 PM", power: 3.95 },
-  { hour: 45, formattedTime: "Day 2, 9:00 PM", label: "9 PM", power: 3.12 },
-  { hour: 46, formattedTime: "Day 2, 10:00 PM", label: "10 PM", power: 1.98 },
-  { hour: 47, formattedTime: "Day 2, 11:00 PM", label: "11 PM", power: 1.32 },
+
+const powerData = ref([]);
+
+
+const portColors = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+  "oklch(0.68 0.16 160)",
 ];
 
-// Test device energy consumption data mapped to ports 0-5 in order (24-hour period, total: 25.0 kWh)
-const testPortMetrics = [
-  { port: 0, usage: 10.0, percent: 40, color: "var(--chart-1)" },
-  { port: 1, usage: 4.25, percent: 17, color: "var(--chart-2)" },
-  { port: 2, usage: 3.25, percent: 13, color: "var(--chart-3)" },
-  { port: 3, usage: 2.75, percent: 11, color: "var(--chart-4)" },
-  { port: 4, usage: 2.5, percent: 10, color: "var(--chart-5)" },
-  { port: 5, usage: 2.25, percent: 9, color: "oklch(0.68 0.16 160)" },
-];
 
-function buildDeviceData() {
-  return testPortMetrics.map((item) => ({
-    ...item,
-    device: getPortDisplayName(item.port),
+function toChartPoint(reading, hour){
+  const tstamp = new Date(reading.timestamp);
+  return{
+    hour,
+    timeFormatted: tstamp.toLocaleString(),
+    label: tstamp.toLocaleString([],{
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+    }),
+    power: reading.totalWatts/1000,
+  }
+};
+
+
+function buildDeviceData(reading = null) {
+  const ports = reading?.ports ?? Array(6).fill(0);
+  const totalUsage = ports.reduce((total, usage) => total + usage, 0);
+
+  return ports.map((usage, port) => ({
+    port,
+    usage,
+    percent: totalUsage > 0 ? (usage / totalUsage) * 100 : 0,
+    color: portColors[port],
+    device: getPortDisplayName(port),
   }));
-}
+};
 
 const deviceData = ref(buildDeviceData());
 
-onMounted(() => {
-  deviceData.value = buildDeviceData();
-});
 
 const deviceChartConfig = computed(() => {
   const config = {};
@@ -149,10 +117,88 @@ const donutTriggers = {
           <span>Share:</span>
           <span class="font-mono font-medium text-foreground">${item.percent}%</span>
         </div>
-      </div>
-    `;
-  },
+        </div>
+        `;
+      },
+    };
+const latestReading = ref(null);
+function setLatestReading(reading){
+  latestReading.value = reading;
+  deviceData.value = buildDeviceData(reading);
 };
+    
+function handlePowerHistory(readings){
+  powerData.value = readings.map(toChartPoint);
+  if (readings.length > 0 ){
+    setLatestReading(readings.at(-1));
+    console.log("Latest reading: ", latestReading);
+  }
+};
+const connected = ref(false);
+let socket = null;
+
+const powerTickValues = computed(() => {
+  const lastHour = powerData.value.at(-1);
+  if (lastHour <= 0){
+    return[0];
+    }
+    return [...new Set([0, Math.floor(lastHour/2), lastHour])]
+});
+
+  function socketConnect() {
+    connected.value = true;
+  };
+
+function socketDisconnect() {
+  connected.value = false;
+};
+
+function handlePowerError(error){
+  console.error("Power error", error.message);
+};
+
+function handlePowerUpdate(reading){
+  if (latestReading.value?.id === reading.id){
+    return;
+  }
+  setLatestReading(reading);
+  powerData.value = [...powerData.value, 
+      toChartPoint(reading, powerData.value.length)].slice(-48).map((point, index) => ({
+        ...point, hour: index}));
+};
+
+function socketConnectionError(error) {
+  console.error("Socket error", error.message)
+};
+
+
+
+onMounted(() => {
+  socket = connectSocket();
+  deviceData.value = buildDeviceData();
+  connected.value = socket.connected;
+
+  socket.on("connect", socketConnect);
+  socket.on("disconnect", socketDisconnect);
+  socket.on("connect_error", socketConnectionError);
+  socket.on("power:history", handlePowerHistory);
+  socket.on("power:update", handlePowerUpdate);
+  socket.on("power:error", handlePowerError);
+  socket.emit("power:refresh");
+});
+
+
+onUnmounted(() => {
+  if (socket) {
+    socket.off("power:history", handlePowerHistory);
+    socket.off("power:update", handlePowerUpdate);
+    socket.off("power:error", handlePowerError);
+    socket.off("connect", socketConnect);
+    socket.off("disconnect", socketDisconnect);
+    socket.off("connect_error", socketConnectionError);
+  }
+});
+
 </script>
 
 <template>
@@ -161,8 +207,10 @@ const donutTriggers = {
       <div>
         <h1 class="text-2xl font-bold text-foreground m-0">Energy Monitor</h1>
         <p
-          class="mt-1.5 text-sm text-muted-foreground flex items-center gap-2 m-0"
-        >
+          class="mt-1.5 text-sm text-muted-foreground flex items-center gap-2 m-0">
+          <Badge :variant = "connected ? 'connected' : 'disconnected'">
+            {{connected ? "Connected" : "Disconnected"}}
+          </Badge>
           <span v-if="user"> · {{ user.username }}</span>
         </p>
       </div>
@@ -198,7 +246,7 @@ const donutTriggers = {
               />
               <VisAxis
                 type="x"
-                :tick-values="[0, 12, 24, 36, 47]"
+                :tick-values="powerTickValues"
                 :tick-format="(val) => powerData[val]?.label ?? ''"
                 :grid-line="false"
               />

@@ -34,21 +34,77 @@ export const LOOKBACK_OPTIONS = [
 ];
 
 /**
- * Generates 15-minute increment power usage readings for the specified lookback range.
- * Keep this simple and lightweight so real data can easily replace it.
+ * Formats a Date object to YYYY-MM-DD for standard date input fields.
  */
-export function generateTimeSeriesData(lookbackValue = "48h", devices = DEFAULT_DEVICES) {
-  const selectedOption = LOOKBACK_OPTIONS.find((o) => o.value === lookbackValue) || LOOKBACK_OPTIONS[2];
-  const totalHours = selectedOption.hours;
-  const intervals = totalHours * 4; // 15-minute increments
+export function formatDateForInput(date = new Date()) {
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Generates 15-minute increment power usage readings for a preset lookback range
+ * or a custom start/end date range.
+ *
+ * @param {string|{mode?: string, value?: string, startDate?: string|Date, endDate?: string|Date}} rangeOptions
+ * @param {Array} devices
+ */
+export function generateTimeSeriesData(rangeOptions = "48h", devices = DEFAULT_DEVICES) {
+  let startTimeMs;
+  let intervals;
 
   const now = new Date();
-  // Round down to the nearest 15-minute boundary
   const remainderMinutes = now.getMinutes() % 15;
   now.setMinutes(now.getMinutes() - remainderMinutes, 0, 0);
 
+  const isCustom = typeof rangeOptions === "object" && (rangeOptions.mode === "custom" || rangeOptions.startDate);
+
+  if (isCustom) {
+    const { startDate, endDate } = rangeOptions;
+    let start;
+    let end;
+
+    if (typeof startDate === "string") {
+      const parts = startDate.split("-").map(Number);
+      start = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0);
+    } else if (startDate instanceof Date) {
+      start = new Date(startDate);
+    } else {
+      start = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+    }
+
+    if (typeof endDate === "string") {
+      const parts = endDate.split("-").map(Number);
+      end = new Date(parts[0], parts[1] - 1, parts[2], 23, 45, 0);
+    } else if (endDate instanceof Date) {
+      end = new Date(endDate);
+    } else {
+      end = new Date(now);
+    }
+
+    // Ensure start is before or equal to end
+    if (start.getTime() > end.getTime()) {
+      const temp = start;
+      start = end;
+      end = temp;
+    }
+
+    startTimeMs = start.getTime();
+    const durationMs = end.getTime() - startTimeMs;
+    const stepMs = 15 * 60 * 1000;
+    // Cap at 2880 intervals (30 days of 15m) to maintain smooth performance
+    intervals = Math.min(2880, Math.max(1, Math.floor(durationMs / stepMs) + 1));
+  } else {
+    const lookbackValue = typeof rangeOptions === "string" ? rangeOptions : rangeOptions?.value || "48h";
+    const selectedOption = LOOKBACK_OPTIONS.find((o) => o.value === lookbackValue) || LOOKBACK_OPTIONS[2];
+    const totalHours = selectedOption.hours;
+    intervals = totalHours * 4; // 15-minute increments
+    startTimeMs = now.getTime() - (intervals - 1) * 15 * 60 * 1000;
+  }
+
   const data = [];
-  const startTimeMs = now.getTime() - (intervals - 1) * 15 * 60 * 1000;
 
   for (let i = 0; i < intervals; i++) {
     const pointTime = new Date(startTimeMs + i * 15 * 60 * 1000);
@@ -66,9 +122,10 @@ export function generateTimeSeriesData(lookbackValue = "48h", devices = DEFAULT_
 
     let total = 0;
     devices.forEach((device, dIdx) => {
-      // Simple pseudo-variation based on index and device index
-      const wave = Math.sin((i + dIdx * 7) / 6) * 0.4 + Math.cos((i * 2 + dIdx * 3) / 12) * 0.3;
-      const noise = ((i * 13 + dIdx * 37) % 19) / 38 - 0.25;
+      // Deterministic wave variation based on timestamp and device index
+      const seed = Math.floor(pointTime.getTime() / (15 * 60 * 1000));
+      const wave = Math.sin((seed + dIdx * 7) / 6) * 0.4 + Math.cos((seed * 2 + dIdx * 3) / 12) * 0.3;
+      const noise = ((seed * 13 + dIdx * 37) % 19) / 38 - 0.25;
       const usage = Math.max(0.05, Number((device.baseUsage + (wave + noise) * device.variance).toFixed(2)));
       point[device.key] = usage;
       total += usage;
@@ -80,3 +137,4 @@ export function generateTimeSeriesData(lookbackValue = "48h", devices = DEFAULT_
 
   return data;
 }
+

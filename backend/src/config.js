@@ -18,11 +18,15 @@ export const config = {
       process.env.GOOGLE_CALLBACK_URL ||
       'http://localhost:3000/api/auth/google/callback',
   },
-  influx: {
-    url: process.env.INFLUX_URL || '',
-    token: process.env.INFLUX_TOKEN || '',
-    org: process.env.INFLUX_ORG || '',
-    bucket: process.env.INFLUX_BUCKET || '',
+  
+  socketTimer: Number(process.env.SOCKET_TIMER) || 1000,
+  
+  database: {
+    user: process.env.PGUSER || 'postgres',
+    password: process.env.PGPASSWORD || 'temporaryPassword',
+    host: process.env.PGHOST || 'localhost',
+    port: Number(process.env.PGPORT) || 5432,
+    database: process.env.PGDATABASE || 'postgres',
   },
   serial: {
     path: process.env.SERIAL_PORT || '',

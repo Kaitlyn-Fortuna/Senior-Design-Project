@@ -1,3 +1,5 @@
+import { disconnectSocket } from "./socket";
+
 const TOKEN_KEY = 'em_token';
 const USER_KEY = 'em_user';
 const OAUTH_ERROR_KEY = 'em_oauth_error';
@@ -38,6 +40,7 @@ export async function login(username, password) {
 }
 
 export function logout() {
+  disconnectSocket();
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
 }
