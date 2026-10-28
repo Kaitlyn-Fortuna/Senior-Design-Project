@@ -92,3 +92,60 @@ export const retrieveRecentRecords = async ( limit = 48) => {
     //return in reverse to get
     return result.rows.reverse();
 }
+
+/**
+ * Queries power data based on optional date range and port selection.
+ * @param {Object} params
+ * @param {string|Date} [params.startDate]
+ * @param {string|Date} [params.endDate]
+ * @param {number[]} [params.ports] Array of port numbers (0 through 5)
+ * @param {number} [params.limit] Max rows to return (defaults to 3000)
+ */
+export const queryPowerData = async ({ startDate, endDate, ports, limit = 3000 } = {}) => {
+    const safeLimit = Math.min(Math.max(Number(limit) || 3000, 1), 10000);
+    const validPortIndices = [0, 1, 2, 3, 4, 5];
+
+    // Determine which port columns to select
+    const selectedPorts = Array.isArray(ports)
+        ? ports.map(Number).filter((p) => validPortIndices.includes(p))
+        : validPortIndices;
+
+    // Build SELECT column list (always include pkey and tstamp)
+    const selectCols = ['pkey', 'tstamp'];
+    validPortIndices.forEach((p) => {
+        if (selectedPorts.includes(p)) {
+            selectCols.push(`p${p}`);
+        } else {
+            selectCols.push(`0 AS p${p}`);
+        }
+    });
+
+    const conditions = [];
+    const values = [];
+
+    if (startDate) {
+        values.push(new Date(startDate));
+        conditions.push(`tstamp >= $${values.length}`);
+    }
+
+    if (endDate) {
+        values.push(new Date(endDate));
+        conditions.push(`tstamp <= $${values.length}`);
+    }
+
+    let sql = `SELECT ${selectCols.join(', ')} FROM powerdata`;
+    if (conditions.length > 0) {
+        sql += ` WHERE ${conditions.join(' AND ')}`;
+    }
+
+    values.push(safeLimit);
+    sql += ` ORDER BY tstamp ASC LIMIT $${values.length}`;
+
+    const query = {
+        text: sql,
+        values,
+    };
+
+    const result = await db.query(query);
+    return result.rows;
+};
