@@ -10,6 +10,9 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  optimizeDeps: {
+    include: ["@unovis/vue", "@unovis/vue > @unovis/ts"],
+  },
   server: {
     port: 5173,
     proxy: {

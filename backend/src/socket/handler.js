@@ -26,11 +26,6 @@ export const initializeSocketHandlers = (io) =>
             try{
                 const recentRecords = await retrieveRecentRecords(MAX_RECORDS);
                 const readings = recentRecords.map(serializeReadings);
-        
-                if(readings.length > 0){
-                    lastReadingId = readings.at(-1).id;
-        
-                }
                 socket.emit('power:history', readings);
                 console.log('Sent', recentRecords.length, 'records to client');
             }catch(error){

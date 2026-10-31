@@ -1,6 +1,17 @@
+import bcrypt from 'bcryptjs';
+
 // In-memory user store. Replace with a real database when you're ready.
-const users = [];
-let nextId = 1;
+const users = [
+  {
+    id: 1,
+    username: 'demo',
+    email: null,
+    googleId: null,
+    displayName: 'Demo User',
+    passwordHash: bcrypt.hashSync('demo123', 10),
+  },
+];
+let nextId = 2;
 
 export function findByUsername(username) {
   if (!username) return null;
