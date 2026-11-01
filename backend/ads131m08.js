@@ -10,6 +10,9 @@ const { Gpio } = onoff;
 
 import { insertReading } from "./src/database/dbAccessMethods.js";
 const INSERT_SECONDS = 1; // Database insert interval
+const C_FLOOR = 0.02; // A rms
+const V_FLOOR = 5; // V rms
+const P_FLOOR = 0.5; // W
 
 const DRDY_PIN = 25; // Data ready pin
 const RESET_PIN = 24; // Reset pin
@@ -335,9 +338,12 @@ let lastInsert = Date.now();
 
 function saveToDb() {
   const avg = (a) => a.map((x) => x / acc.n);
-  const p = avg(acc.p),
-    c = avg(acc.c),
-    v = avg(acc.v);
+  const clean = (x, floor) => (Math.abs(x) < floor ? 0 : x);
+  const v = avg(acc.v).map((x) => clean(x, V_FLOOR));
+  const c = avg(acc.c).map((x) => clean(x, C_FLOOR));
+  const p = avg(acc.p).map((x, ch) =>
+    c[ch] === 0 || v[CT_VS[ch]] === 0 ? 0 : clean(x, P_FLOOR),
+  );
   const pf = p.map((pw, ch) => {
     const s = v[CT_VS[ch]] * c[ch];
     return s > 1 ? pw / s : 0;
