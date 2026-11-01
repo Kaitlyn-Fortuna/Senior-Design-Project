@@ -9,10 +9,16 @@ import i2c from "i2c-bus";
 const { Gpio } = onoff;
 
 import { insertReading } from "./src/database/dbAccessMethods.js";
-const INSERT_SECONDS = 1; // Database insert interval
-const C_FLOOR = 0.02; // A rms
-const V_FLOOR = 5; // V rms
-const P_FLOOR = 0.5; // W
+import {
+  loadDeviceConfig,
+  watchDeviceConfig,
+  ampsPerVolt,
+  voltsPerVolt,
+  channelGains,
+  CURRENT_KEYS,
+  VOLTAGE_KEYS,
+  CONFIG_PATH,
+} from "./src/deviceConfig.js";
 
 const DRDY_PIN = 25; // Data ready pin
 const RESET_PIN = 24; // Reset pin
@@ -45,13 +51,29 @@ const CHANNELS = [
   { name: "VS2", pin: "AIN7" },
 ];
 
-const CT_RATIO = 2400; // CT clamp ratio: 2400:1
-const R_BURDEN = 10; // Resistor across CT clamp: 10ohms
-const TURNS = [1, 1, 10, 1, 1, 1]; // Line splitter (x1 or x10) for each clamp
-const DIVIDER = 23; // (10k + 12k + 1k) / 1k
-const VT_RATIO = 120 / 10.4; // Voltage transformer ratio: 120 V / 10.4 V
-const CT_VS = [0, 0, 0, 0, 0, 0]; // Voltage sensor for each CT clamp (0 = VS1, 1 = VS2)
-const CAL = [1, 1, 1, 1, 1, 1, 1, 1]; // Calibration factors for each channel
+let cfg = loadDeviceConfig();
+let SCALE = []; // ADC volts -> amps (ch 0-5) or line volts (ch 6-7)
+let CT_VS = []; // Voltage sensor for each CT (0 = v0, 1 = v1)
+let GAINS = []; // ADC gain per channel (c0-c5, v0, v1)
+let V_ON = 0; // Minimum voltage to light an LED
+let I_ON = 0; // Minimum current to light an LED
+let V_FLOOR = 0; // Database: voltages below this are saved as 0
+let C_FLOOR = 0; // Database: currents below this are saved as 0
+let P_FLOOR = 0; // Database: power below this is saved as 0
+let INSERT_SECONDS = 1; // Database insert interval in seconds
+
+function deriveSettings(c) {
+  SCALE = [...CURRENT_KEYS.map((k) => ampsPerVolt(c, k)), ...VOLTAGE_KEYS.map((k) => voltsPerVolt(c, k))];
+  CT_VS = CURRENT_KEYS.map((k) => VOLTAGE_KEYS.indexOf(c.inputs[k].voltage_sensor));
+  GAINS = channelGains(c);
+  V_ON = c.leds.min_voltage;
+  I_ON = c.leds.min_current;
+  V_FLOOR = c.database.min_voltage;
+  C_FLOOR = c.database.min_current;
+  P_FLOOR = c.database.min_power;
+  INSERT_SECONDS = c.database.insert_seconds;
+}
+deriveSettings(cfg);
 
 const LED_ADDR = 0x60; // A0-A2 tied to GND
 const LED_CMD_WRITE = 0x44; // load shift register + latch to outputs
@@ -67,10 +89,8 @@ const LED_BIT = {
   CT6: 4, // D5
 };
 
-const V_ON = 20; // Minimum voltage to light the LED (20 V)
-const I_ON = 0.05; // Minimum current to light the LED (50mA)
 const CLKIN_HZ = 8_192_000; // External oscillator clock speed
-const OSR = 1024; // Over-sampling ratio
+const OSR = cfg.adc.oversampling_ratio; // Over-sampling ratio (restart to change)
 const OSR_CODES = {
   128: 0,
   256: 1,
@@ -83,7 +103,7 @@ const OSR_CODES = {
 };
 const OSR_CODE = OSR_CODES[OSR];
 const NOMINAL_SPS = CLKIN_HZ / 2 / OSR; // Samples per second per channel
-const REPORT_SECONDS = 1; // How often to compute and print (multiple of 1/60s [0.1, 0.2, 0.5, 1])
+const REPORT_SECONDS = cfg.adc.report_seconds; // (restart to change) How often to compute and print (multiple of 1/60s [0.1, 0.2, 0.5, 1])
 const BLOCK = Math.round(NOMINAL_SPS * REPORT_SECONDS); // Samples per report
 const SAMPLES_PER_SECOND = Math.round(NOMINAL_SPS); // Debug print rate (1 line/sec)
 
@@ -160,8 +180,13 @@ function writeReg(addr, val) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const GAINS = [4, 4, 4, 4, 4, 4, 1, 1]; // per channel, edit as needed
 const gainCode = (g) => Math.log2(g);
+function writeGains() {
+  const pack = (a) =>
+    a.reduce((acc, g, i) => acc | (gainCode(g) << (4 * i)), 0);
+  writeReg(REG.GAIN1, pack(GAINS.slice(0, 4)));
+  writeReg(REG.GAIN2, pack(GAINS.slice(4, 8)));
+}
 
 async function init() {
   // 1. Hardware reset
@@ -181,10 +206,7 @@ async function init() {
   writeReg(REG.MODE, 0x0110);
 
   // 4. Set gains
-  const pack = (a) =>
-    a.reduce((acc, g, i) => acc | (gainCode(g) << (4 * i)), 0);
-  writeReg(REG.GAIN1, pack(GAINS.slice(0, 4)));
-  writeReg(REG.GAIN2, pack(GAINS.slice(4, 8)));
+  writeGains();
 
   // 5. Clock register
   writeReg(REG.CLOCK, 0xff82 | (OSR_CODE << 2));
@@ -297,6 +319,28 @@ async function main() {
     onSample(volts);
   });
 
+  watchDeviceConfig((next) => {
+    const gainsChanged = channelGains(next).some((g, i) => g !== GAINS[i]);
+    const needsRestart =
+      next.adc.oversampling_ratio !== cfg.adc.oversampling_ratio ||
+      next.adc.report_seconds !== cfg.adc.report_seconds;
+    cfg = next;
+    deriveSettings(cfg);
+    if (gainsChanged) {
+      try {
+        writeGains();
+      } catch (e) {
+        console.error(`Could not update ADC gains: ${e.message}`);
+      }
+    }
+    resetBlock();
+    console.log(
+      `Settings reloaded from ${CONFIG_PATH}` +
+        (gainsChanged ? " (ADC gains updated)" : "") +
+        (needsRestart ? " (restart to apply oversampling_ratio / report_seconds)" : ""),
+    );
+  });
+
   if (DEBUG)
     setInterval(() => {
       console.log(
@@ -330,8 +374,13 @@ const sumVI = new Float64Array(12);
 let count = 0;
 let blockStart = process.hrtime.bigint();
 
-const iScale = (ch) => (CT_RATIO / R_BURDEN / TURNS[ch]) * CAL[ch];
-const vScale = (ch) => DIVIDER * VT_RATIO * CAL[ch];
+function resetBlock() {
+  sum.fill(0);
+  sumSq.fill(0);
+  sumVI.fill(0);
+  count = 0;
+  blockStart = process.hrtime.bigint();
+}
 
 const acc = { n: 0, p: Array(6).fill(0), c: Array(6).fill(0), v: [0, 0] };
 let lastInsert = Date.now();
@@ -368,8 +417,8 @@ function onSample(v) {
 
   // Scale to real units
   const i = [];
-  const vs = [v[6] * vScale(6), v[7] * vScale(7)];
-  for (let ch = 0; ch < 6; ch++) i.push(v[ch] * iScale(ch));
+  const vs = [v[6] * SCALE[6], v[7] * SCALE[7]];
+  for (let ch = 0; ch < 6; ch++) i.push(v[ch] * SCALE[ch]);
   const x = [...i, ...vs];
   for (let k = 0; k < 8; k++) {
     sum[k] += x[k];

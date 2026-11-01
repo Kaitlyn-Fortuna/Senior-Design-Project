@@ -1,0 +1,88 @@
+{
+  "inputs": {
+    "v0": {
+      "name": "Leg 1",
+      "transformer_input_v": 120,
+      "transformer_output_v": 10.4,
+      "divider_ratio": 23,
+      "gain": 1,
+      "calibration": 1.0
+    },
+    "v1": {
+      "name": "Leg 2",
+      "transformer_input_v": 120,
+      "transformer_output_v": 10.4,
+      "divider_ratio": 23,
+      "gain": 1,
+      "calibration": 1.0
+    },
+    "c0": {
+      "name": "Current Clamp 1",
+      "ct_ratio": 2400,
+      "ct_burden_ohms": 10,
+      "turns": 1,
+      "voltage_sensor": "v0",
+      "gain": 4,
+      "calibration": 1.0
+    },
+    "c1": {
+      "name": "Current Clamp 2",
+      "ct_ratio": 2400,
+      "ct_burden_ohms": 10,
+      "turns": 1,
+      "voltage_sensor": "v0",
+      "gain": 4,
+      "calibration": 1.0
+    },
+    "c2": {
+      "name": "Current Clamp 3",
+      "ct_ratio": 2400,
+      "ct_burden_ohms": 10,
+      "turns": 1,
+      "voltage_sensor": "v0",
+      "gain": 4,
+      "calibration": 1.0
+    },
+    "c3": {
+      "name": "Current Clamp 4",
+      "ct_ratio": 2400,
+      "ct_burden_ohms": 10,
+      "turns": 1,
+      "voltage_sensor": "v0",
+      "gain": 4,
+      "calibration": 1.0
+    },
+    "c4": {
+      "name": "Current Clamp 5",
+      "ct_ratio": 2400,
+      "ct_burden_ohms": 10,
+      "turns": 1,
+      "voltage_sensor": "v0",
+      "gain": 4,
+      "calibration": 1.0
+    },
+    "c5": {
+      "name": "Current Clamp 6",
+      "ct_ratio": 2400,
+      "ct_burden_ohms": 10,
+      "turns": 1,
+      "voltage_sensor": "v0",
+      "gain": 4,
+      "calibration": 1.0
+    }
+  },
+  "adc": {
+    "oversampling_ratio": 1024,
+    "report_seconds": 1
+  },
+  "database": {
+    "insert_seconds": 1,
+    "min_voltage": 5,
+    "min_current": 0.02,
+    "min_power": 0.5
+  },
+  "leds": {
+    "min_voltage": 20,
+    "min_current": 0.05
+  }
+}
