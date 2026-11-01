@@ -77,7 +77,7 @@ const OSR_CODES = {
 };
 const OSR_CODE = OSR_CODES[OSR];
 const NOMINAL_SPS = CLKIN_HZ / 2 / OSR; // Samples per second per channel
-const REPORT_SECONDS = 0.1; // How often to compute and print (multiple of 1/60s [0.1, 0.2, 0.5, 1])
+const REPORT_SECONDS = 1; // How often to compute and print (multiple of 1/60s [0.1, 0.2, 0.5, 1])
 const BLOCK = Math.round(NOMINAL_SPS * REPORT_SECONDS); // Samples per report
 const SAMPLES_PER_SECOND = Math.round(NOMINAL_SPS); // Debug print rate (1 line/sec)
 
