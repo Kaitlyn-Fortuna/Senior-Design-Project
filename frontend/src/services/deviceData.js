@@ -1,4 +1,4 @@
-import { getPortDisplayName, isPortEnabled } from "./portConfig";
+import { getPortDisplayName } from "./portConfig";
 
 /**
  * Test data configurations mapped to input ports 0 through 5 in order.
@@ -17,7 +17,7 @@ export const TEST_PORT_CONFIGS = [
  * Defaults to "Port N" if no name has been saved or if blank.
  */
 export function getDevices() {
-  return TEST_PORT_CONFIGS.filter((config) => isPortEnabled(config.port)).map((config) => ({
+  return TEST_PORT_CONFIGS.map((config) => ({
     ...config,
     label: getPortDisplayName(config.port),
   }));

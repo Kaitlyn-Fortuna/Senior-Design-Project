@@ -5,8 +5,7 @@ const MAX_RECORDS = 48;
 
 //objectify the readings
 const serializeReadings = (row) => {
-    const num = (value) => Number(value) || 0;
-    const ports = [row.p0, row.p1, row.p2, row.p3, row.p4, row.p5].map(num);  // real power, W
+    const ports = [row.p0, row.p1, row.p2, row.p3, row.p4, row.p5].map((value) => Number(value) || 0);
 
     //return object
     return{
@@ -14,9 +13,6 @@ const serializeReadings = (row) => {
         timestamp: new Date(row.tstamp).toISOString(),
         ports,
         totalWatts: ports.reduce((sum, power) => sum + power, 0),
-        currents: [row.c0, row.c1, row.c2, row.c3, row.c4, row.c5].map(num),        // A rms
-        voltages: [row.v0, row.v1].map(num),                                        // V rms
-        powerFactors: [row.pf0, row.pf1, row.pf2, row.pf3, row.pf4, row.pf5].map(num),
         isConsolidated: row.isconsolidated || false,
     }
 }

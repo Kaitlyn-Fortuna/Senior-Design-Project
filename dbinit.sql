@@ -8,19 +8,5 @@ CREATE TABLE powerdata (
 	p2				real		DEFAULT 0.0,
 	p3				real		DEFAULT 0.0,
 	p4				real		DEFAULT 0.0,
-	p5				real		DEFAULT 0.0,
-	v0				real		DEFAULT 0.0,
-	v1				real		DEFAULT 0.0,
-	c0				real		DEFAULT 0.0,
-	c1				real		DEFAULT 0.0,
-	c2				real		DEFAULT 0.0,
-	c3				real		DEFAULT 0.0,
-	c4				real		DEFAULT 0.0,
-	c5				real		DEFAULT 0.0,
-	pf0				real		DEFAULT 0.0,
-	pf1				real		DEFAULT 0.0,
-	pf2				real		DEFAULT 0.0,
-	pf3				real		DEFAULT 0.0,
-	pf4				real		DEFAULT 0.0,
-	pf5				real		DEFAULT 0.0
+	p5				real		DEFAULT 0.0
 );

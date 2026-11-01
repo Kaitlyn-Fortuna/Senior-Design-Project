@@ -8,7 +8,7 @@ import fs from "node:fs";
 import i2c from "i2c-bus";
 const { Gpio } = onoff;
 
-import { insertReading } from "./src/database/dbAccessMethods.js";
+import { insertPowers } from "./src/database/dbAccessMethods.js";
 import {
   loadDeviceConfig,
   watchDeviceConfig,
@@ -397,11 +397,7 @@ function saveToDb() {
   const p = avg(acc.p).map((x, ch) =>
     c[ch] === 0 || v[CT_VS[ch]] === 0 ? 0 : clean(x, P_FLOOR),
   );
-  const pf = p.map((pw, ch) => {
-    const s = v[CT_VS[ch]] * c[ch];
-    return s > 1 ? pw / s : 0;
-  });
-  insertReading({ p, c, v, pf }).catch((e) =>
+  insertPowers(p).catch((e) =>
     console.error("DB insert failed:", e.message),
   );
   acc.n = 0;
