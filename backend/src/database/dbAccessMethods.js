@@ -31,6 +31,39 @@ export const insertRecord = async (currents = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vo
     return result;
 }
 
+export const insertExtendedRecord = async ({ p, c, v, pf }) => {
+    const query = {
+        text: `INSERT INTO powerdata
+            (p0, p1, p2, p3, p4, p5,
+             c0, c1, c2, c3, c4, c5,
+             v0, v1,
+             pf0, pf1, pf2, pf3, pf4, pf5)
+            VALUES ($1,$2,$3,$4,$5,$6, $7,$8,$9,$10,$11,$12, $13,$14, $15,$16,$17,$18,$19,$20)
+            RETURNING pkey`,
+        values: [...p, ...c, ...v, ...pf],
+    };
+    return db.query(query);
+};
+
+// Insert one measured row from the ADC driver. Arrays are in port order:
+// p: real power W [6], c: current A rms [6], v: voltage V rms [2], pf: power factor [6]
+export const insertReading = async ({ p, c, v, pf }) => {
+    const query = {
+        text: `INSERT INTO powerdata
+            (p0, p1, p2, p3, p4, p5,
+             c0, c1, c2, c3, c4, c5,
+             v0, v1,
+             pf0, pf1, pf2, pf3, pf4, pf5)
+            VALUES ($1, $2, $3, $4, $5, $6,
+                    $7, $8, $9, $10, $11, $12,
+                    $13, $14,
+                    $15, $16, $17, $18, $19, $20)
+            RETURNING pkey`,
+        values: [...p, ...c, ...v, ...pf],
+    };
+    return db.query(query);
+};
+
 export const retrieveRecordByPKey = async (pKeyInt) =>{
     const query = {
         text: 'SELECT * FROM powerdata WHERE pkey = $1',

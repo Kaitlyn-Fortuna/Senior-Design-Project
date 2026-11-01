@@ -8,6 +8,9 @@ import fs from "node:fs";
 import i2c from "i2c-bus";
 const { Gpio } = onoff;
 
+import { insertReading } from "./src/database/dbAccessMethods.js";
+const INSERT_SECONDS = 1; // Database insert interval
+
 const DRDY_PIN = 25; // Data ready pin
 const RESET_PIN = 24; // Reset pin
 const SPI_HZ = 8_000_000; // SPI clock speed (max 25MHz) (1 bit per cycle)
@@ -41,7 +44,7 @@ const CHANNELS = [
 
 const CT_RATIO = 2400; // CT clamp ratio: 2400:1
 const R_BURDEN = 10; // Resistor across CT clamp: 10ohms
-const TURNS = [1, 1, 1, 1, 1, 1]; // Line splitter (x1 or x10) for each clamp
+const TURNS = [1, 1, 10, 1, 1, 1]; // Line splitter (x1 or x10) for each clamp
 const DIVIDER = 23; // (10k + 12k + 1k) / 1k
 const VT_RATIO = 120 / 10.4; // Voltage transformer ratio: 120 V / 10.4 V
 const CT_VS = [0, 0, 0, 0, 0, 0]; // Voltage sensor for each CT clamp (0 = VS1, 1 = VS2)
@@ -327,6 +330,27 @@ let blockStart = process.hrtime.bigint();
 const iScale = (ch) => (CT_RATIO / R_BURDEN / TURNS[ch]) * CAL[ch];
 const vScale = (ch) => DIVIDER * VT_RATIO * CAL[ch];
 
+const acc = { n: 0, p: Array(6).fill(0), c: Array(6).fill(0), v: [0, 0] };
+let lastInsert = Date.now();
+
+function saveToDb() {
+  const avg = (a) => a.map((x) => x / acc.n);
+  const p = avg(acc.p),
+    c = avg(acc.c),
+    v = avg(acc.v);
+  const pf = p.map((pw, ch) => {
+    const s = v[CT_VS[ch]] * c[ch];
+    return s > 1 ? pw / s : 0;
+  });
+  insertReading({ p, c, v, pf }).catch((e) =>
+    console.error("DB insert failed:", e.message),
+  );
+  acc.n = 0;
+  acc.p.fill(0);
+  acc.c.fill(0);
+  acc.v.fill(0);
+}
+
 function onSample(v) {
   n++;
   if (RAW_VIEW) {
@@ -355,6 +379,8 @@ function onSample(v) {
   const rms = (k) => Math.sqrt(Math.max(0, sumSq[k] / count - mean(k) ** 2));
 
   const vRms = [rms(6), rms(7)];
+  acc.v[0] += vRms[0];
+  acc.v[1] += vRms[1];
   console.log(
     `\nVS1 ${vRms[0].toFixed(1)} V   VS2 ${vRms[1].toFixed(1)} V   ` +
       `(${count} samples, ~${missed} missed)`,
@@ -370,6 +396,8 @@ function onSample(v) {
     const p = sumVI[ch] / count - mean(vk) * mean(ch);
     const sVA = vRms[CT_VS[ch]] * iRms;
     const pf = sVA > 1 ? p / sVA : 0;
+    acc.p[ch] += p;
+    acc.c[ch] += iRms;
     console.log(
       `  CT${ch + 1}  ${iRms.toFixed(3).padStart(8)} ${p.toFixed(1).padStart(8)} ` +
         `${sVA.toFixed(1).padStart(9)} ${pf.toFixed(3).padStart(6)}`,
@@ -377,6 +405,12 @@ function onSample(v) {
   }
 
   setLeds(mask);
+
+  acc.n++;
+  if (Date.now() - lastInsert >= INSERT_SECONDS * 1000) {         
+    lastInsert = Date.now();
+    saveToDb();
+  }
 
   sum.fill(0);
   sumSq.fill(0);
