@@ -13,7 +13,7 @@ export function connectSocket() {
     else
         {
             console.log('Connecting to socket');
-            socket = io(API_URL, {
+            socket = io(API_URL || undefined, {
                 reconnection: true,
                 reconnectionDelay: 500,
                 reconnectionDelayMax: 2000,

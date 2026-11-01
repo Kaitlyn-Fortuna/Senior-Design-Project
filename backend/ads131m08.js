@@ -63,7 +63,11 @@ let P_FLOOR = 0; // Database: power below this is saved as 0
 let INSERT_SECONDS = 1; // Database insert interval in seconds
 
 function deriveSettings(c) {
-  SCALE = [...CURRENT_KEYS.map((k) => ampsPerVolt(c, k)), ...VOLTAGE_KEYS.map((k) => voltsPerVolt(c, k))];
+  const on = (k) => (c.inputs[k].enabled ? 1 : 0);
+  SCALE = [
+    ...CURRENT_KEYS.map((k) => ampsPerVolt(c, k) * on(k)),
+    ...VOLTAGE_KEYS.map((k) => voltsPerVolt(c, k) * on(k)),
+  ];
   CT_VS = CURRENT_KEYS.map((k) => VOLTAGE_KEYS.indexOf(c.inputs[k].voltage_sensor));
   GAINS = channelGains(c);
   V_ON = c.leds.min_voltage;

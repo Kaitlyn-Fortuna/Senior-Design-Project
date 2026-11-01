@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { getUser, logout } from "../services/auth";
-import { getPortDisplayName } from "@/services/portConfig";
+import { getPortDisplayName, isPortEnabled } from "@/services/portConfig";
 import { Button } from "@/components/ui/button";
 import { SettingsIcon } from "@lucide/vue";
 import {
@@ -79,13 +79,15 @@ function buildDeviceData(reading = null) {
   const ports = reading?.ports ?? Array(6).fill(0);
   const totalUsage = ports.reduce((total, usage) => total + usage, 0);
 
-  return ports.map((usage, port) => ({
-    port,
-    usage,
-    percent: totalUsage > 0 ? (usage / totalUsage) * 100 : 0,
-    color: portColors[port],
-    device: getPortDisplayName(port),
-  }));
+  return ports
+    .map((usage, port) => ({
+      port,
+      usage,
+      percent: totalUsage > 0 ? (usage / totalUsage) * 100 : 0,
+      color: portColors[port],
+      device: getPortDisplayName(port),
+    }))
+    .filter((item) => isPortEnabled(item.port));
 };
 
 const deviceData = ref(buildDeviceData());

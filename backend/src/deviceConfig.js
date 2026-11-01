@@ -15,6 +15,7 @@ export const VALID_OSR = [128, 256, 512, 1024, 2048, 4096, 8192, 16256];
 
 // Defaults
 const DEFAULT_VOLTAGE = {
+  enabled: true, // false = not connected: reads as 0, hidden from the dashboard
   name: "",
   transformer_input_v: 120,
   transformer_output_v: 10.4,
@@ -24,6 +25,7 @@ const DEFAULT_VOLTAGE = {
 };
 
 const DEFAULT_CURRENT = {
+  enabled: true, // false = not connected: reads as 0, hidden from the dashboard
   name: "",
   ct_ratio: 2400,
   ct_burden_ohms: 10,
@@ -93,6 +95,15 @@ function text(errors, label, value) {
   return value.trim().slice(0, 40);
 }
 
+function bool(errors, label, value, fallback) {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "boolean") {
+    errors.push(`${label} must be true or false`);
+    return fallback;
+  }
+  return value;
+}
+
 function choice(errors, label, value, fallback, options) {
   if (value === undefined || value === null) return fallback;
   if (!options.includes(value)) {
@@ -105,6 +116,7 @@ function choice(errors, label, value, fallback, options) {
 function validateVoltage(errors, key, input = {}) {
   const d = DEFAULT_VOLTAGE;
   return {
+    enabled: bool(errors, `${key} enabled`, input.enabled, d.enabled),
     name: text(errors, `${key} name`, input.name),
     transformer_input_v: num(
       errors,
@@ -143,6 +155,7 @@ function validateVoltage(errors, key, input = {}) {
 function validateCurrent(errors, key, input = {}) {
   const d = DEFAULT_CURRENT;
   return {
+    enabled: bool(errors, `${key} enabled`, input.enabled, d.enabled),
     name: text(errors, `${key} name`, input.name),
     ct_ratio: num(errors, `${key} ct_ratio`, input.ct_ratio, d.ct_ratio, {
       min: 1,
@@ -253,6 +266,15 @@ export function validateDeviceConfig(src = {}) {
     ),
   };
 
+  const enabledVoltages = VOLTAGE_KEYS.filter((k) => inputs[k].enabled);
+  if (enabledVoltages.length > 0) {
+    for (const k of CURRENT_KEYS) {
+      if (!enabledVoltages.includes(inputs[k].voltage_sensor)) {
+        inputs[k].voltage_sensor = enabledVoltages[0];
+      }
+    }
+  }
+
   return { config: { inputs, adc, database, leds }, errors };
 }
 
@@ -297,6 +319,10 @@ export function loadDeviceConfig() {
   if (errors.length > 0) {
     console.warn("Device config problems (defaults used for these):", errors);
   }
+
+  if (typeof parsedData.last_updated === "string") {
+    return { last_updated: parsedData.last_updated, ...config };
+  }
   return config;
 }
 
@@ -306,10 +332,11 @@ export function saveDeviceConfig(cfg) {
     console.error("Device configuration validation errors:", errors);
     throw new Error("Invalid device configuration");
   }
+  const saved = { last_updated: new Date().toISOString(), ...config };
   const tmp = `${CONFIG_PATH}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  fs.writeFileSync(tmp, JSON.stringify(saved, null, 2) + "\n", "utf-8");
   fs.renameSync(tmp, CONFIG_PATH);
-  return config;
+  return saved;
 }
 
 export function watchDeviceConfig(onChange) {

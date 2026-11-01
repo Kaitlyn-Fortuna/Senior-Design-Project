@@ -1,4 +1,5 @@
 import { disconnectSocket } from "./socket";
+import { refreshPortNamesFromServer } from "./portConfig";
 
 const TOKEN_KEY = 'em_token';
 const USER_KEY = 'em_user';
@@ -36,6 +37,7 @@ export async function login(username, password) {
 
   localStorage.setItem(TOKEN_KEY, data.token);
   localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+  await refreshPortNamesFromServer();
   return data.user;
 }
 

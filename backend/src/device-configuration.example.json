@@ -1,6 +1,7 @@
 {
   "inputs": {
     "v0": {
+      "enabled": true,
       "name": "Leg 1",
       "transformer_input_v": 120,
       "transformer_output_v": 10.4,
@@ -9,6 +10,7 @@
       "calibration": 1.0
     },
     "v1": {
+      "enabled": true,
       "name": "Leg 2",
       "transformer_input_v": 120,
       "transformer_output_v": 10.4,
@@ -17,6 +19,7 @@
       "calibration": 1.0
     },
     "c0": {
+      "enabled": true,
       "name": "Current Clamp 1",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
@@ -26,6 +29,7 @@
       "calibration": 1.0
     },
     "c1": {
+      "enabled": true,
       "name": "Current Clamp 2",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
@@ -35,6 +39,7 @@
       "calibration": 1.0
     },
     "c2": {
+      "enabled": true,
       "name": "Current Clamp 3",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
@@ -44,6 +49,7 @@
       "calibration": 1.0
     },
     "c3": {
+      "enabled": true,
       "name": "Current Clamp 4",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
@@ -53,6 +59,7 @@
       "calibration": 1.0
     },
     "c4": {
+      "enabled": true,
       "name": "Current Clamp 5",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
@@ -62,6 +69,7 @@
       "calibration": 1.0
     },
     "c5": {
+      "enabled": true,
       "name": "Current Clamp 6",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,

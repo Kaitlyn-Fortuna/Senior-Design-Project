@@ -1,5 +1,38 @@
-// LocalStorage key for port names
+import { fetchDeviceConfig } from "./deviceConfig";
+
 export const PORT_NAMES_STORAGE_KEY = "energy_monitor_port_names";
+const PORT_KEYS = ["c0", "c1", "c2", "c3", "c4", "c5", "v0", "v1"];
+
+const PORT_ENABLED_STORAGE_KEY = "energy_monitor_port_enabled";
+
+export function cachePortNames(config) {
+  const names = PORT_KEYS.map((k) => config?.inputs?.[k]?.name || "");
+  saveSavedPortNames(names);
+  const enabled = PORT_KEYS.map((k) => config?.inputs?.[k]?.enabled !== false);
+  try {
+    localStorage.setItem(PORT_ENABLED_STORAGE_KEY, JSON.stringify(enabled));
+  } catch {
+
+  }
+}
+
+export function isPortEnabled(portIndex) {
+  try {
+    const enabled = JSON.parse(localStorage.getItem(PORT_ENABLED_STORAGE_KEY) || "[]");
+    return enabled[portIndex] !== false;
+  } catch {
+    return true;
+  }
+}
+
+export async function refreshPortNamesFromServer() {
+  try {
+    const { config } = await fetchDeviceConfig();
+    cachePortNames(config);
+  } catch {
+
+  }
+}
 
 /**
  * Retrieves saved port names array from localStorage.
