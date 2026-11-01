@@ -31,8 +31,6 @@ export const insertRecord = async (currents = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vo
     return result;
 }
 
-// Insert one row of real power (W) per port, measured by the ADC driver (ads131m08.js).
-// p: array of 6 numbers in port order (p0..p5).
 export const insertPowers = async (p) => {
     const query = {
         text: 'INSERT INTO powerdata(p0, p1, p2, p3, p4, p5) VALUES ($1, $2, $3, $4, $5, $6) RETURNING pkey',

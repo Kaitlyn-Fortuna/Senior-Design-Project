@@ -15,7 +15,7 @@ export const VALID_OSR = [128, 256, 512, 1024, 2048, 4096, 8192, 16256];
 
 // Defaults
 const DEFAULT_VOLTAGE = {
-  enabled: true, // false = not connected: reads as 0, hidden from the dashboard
+  enabled: true,
   name: "",
   transformer_input_v: 120,
   transformer_output_v: 10.4,
@@ -25,7 +25,7 @@ const DEFAULT_VOLTAGE = {
 };
 
 const DEFAULT_CURRENT = {
-  enabled: true, // false = not connected: reads as 0, hidden from the dashboard
+  enabled: true,
   name: "",
   ct_ratio: 2400,
   ct_burden_ohms: 10,
