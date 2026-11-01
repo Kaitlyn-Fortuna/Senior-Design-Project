@@ -45,6 +45,7 @@ import {
   GaugeIcon,
   SlidersHorizontalIcon,
   ZapIcon,
+  RotateCwIcon,
 } from "@lucide/vue";
 
 const router = useRouter();
@@ -205,22 +206,57 @@ watch(
   { deep: true },
 );
 
+const SAVE_ATTEMPTS = 3; // tries before showing a connection error
+const RETRY_DELAY_MS = 500; // wait between tries
+const syncError = ref(""); // set when the device couldn't be reached
+let saveSeq = 0; // each save gets a number; an older save stops if a newer one starts
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Retry only problems that might go away: no response (network) or a server error (5xx).
+// Bad values (400) and an expired login (401) are answered right away.
+const isRetryable = (err) => err.status === undefined || err.status >= 500;
+
 async function save() {
+  clearTimeout(saveTimer); // "Try again" shouldn't also fire a pending autosave
+  const seq = ++saveSeq;
   status.value = "saving";
-  try {
-    const result = await saveDeviceConfig(config.value);
-    cachePortNames(result.config);
-    saveErrors.value = [];
-    lastSaved.value = result.config.last_updated ? new Date(result.config.last_updated) : new Date();
-    status.value = "saved";
-  } catch (err) {
-    if (err.status === 401) return goToLogin();
-    // Nothing was saved; keep what's on screen so it can be corrected
-    saveErrors.value = err.errors?.length ? err.errors : [err.message];
-    status.value = "error";
-    // Open the Advanced section of any input with a bad field so it's visible
-    for (const f of invalidFields.value) open.value[f.split(".")[0]] = true;
-    if (["adc", "database", "leds"].some(sectionInvalid)) open.value.system = true;
+
+  for (let attempt = 1; attempt <= SAVE_ATTEMPTS; attempt++) {
+    try {
+      const result = await saveDeviceConfig(config.value);
+      if (seq !== saveSeq) return; // a newer save took over
+      cachePortNames(result.config);
+      saveErrors.value = [];
+      syncError.value = "";
+      lastSaved.value = result.config.last_updated ? new Date(result.config.last_updated) : new Date();
+      status.value = "saved";
+      return;
+    } catch (err) {
+      if (seq !== saveSeq) return;
+      if (err.status === 401) return goToLogin();
+
+      if (isRetryable(err) && attempt < SAVE_ATTEMPTS) {
+        await sleep(RETRY_DELAY_MS);
+        if (seq !== saveSeq) return;
+        continue;
+      }
+
+      status.value = "error";
+      if (isRetryable(err)) {
+        // Still failing after every try: the device or backend is unreachable
+        saveErrors.value = [];
+        syncError.value = `Couldn't reach the device after ${SAVE_ATTEMPTS} tries. Check that the backend is running, then try again.`;
+      } else {
+        // Nothing was saved; keep what's on screen so it can be corrected
+        syncError.value = "";
+        saveErrors.value = err.errors?.length ? err.errors : [err.message];
+        // Open the Advanced section of any input with a bad field so it's visible
+        for (const f of invalidFields.value) open.value[f.split(".")[0]] = true;
+        if (["adc", "database", "leds"].some(sectionInvalid)) open.value.system = true;
+      }
+      return;
+    }
   }
 }
 
@@ -262,6 +298,11 @@ function goToLogin() {
           <template v-else-if="status === 'error'">
             <CircleAlertIcon class="size-4" />
             Not saved{{ lastSavedText ? ` · last saved ${lastSavedText}` : "" }}
+            <!-- Only for connection problems; bad values need fixing, not retrying -->
+            <Button v-if="syncError" variant="outline" size="sm" class="ml-1" @click="save">
+              <RotateCwIcon data-icon="inline-start" />
+              Try again
+            </Button>
           </template>
           <template v-else-if="lastSavedText">
             <CheckIcon class="size-4" /> Last saved {{ lastSavedText }}
@@ -284,6 +325,13 @@ function goToLogin() {
     </Alert>
 
     <main v-else-if="config" class="flex flex-col gap-6 w-full">
+      <!-- Couldn't reach the device -->
+      <Alert v-if="syncError" variant="destructive">
+        <CircleAlertIcon />
+        <AlertTitle>Not saved</AlertTitle>
+        <AlertDescription>{{ syncError }}</AlertDescription>
+      </Alert>
+
       <!-- Validation errors from the last save -->
       <Alert v-if="saveErrors.length" variant="destructive">
         <CircleAlertIcon />
