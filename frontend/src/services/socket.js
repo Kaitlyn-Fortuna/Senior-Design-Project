@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 
-const API_URL = import.meta.env.VITE_API_URL||'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL||'';
 
 let socket = null;
 
@@ -13,7 +13,11 @@ export function connectSocket() {
     else
         {
             console.log('Connecting to socket');
-            socket = io(API_URL);
+            socket = io(API_URL || undefined, {
+                reconnection: true,
+                reconnectionDelay: 500,
+                reconnectionDelayMax: 2000,
+            });
             return socket;
         }
 }

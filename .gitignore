@@ -4,3 +4,7 @@ dist/
 *.log
 .DS_Store
 .vscode/
+
+# Device Specific conguration files
+backend/src/device-configuration.json
+backend/src/device-configuration.json.tmp

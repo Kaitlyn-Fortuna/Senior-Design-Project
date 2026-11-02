@@ -31,6 +31,14 @@ export const insertRecord = async (currents = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vo
     return result;
 }
 
+export const insertPowers = async (p) => {
+    const query = {
+        text: 'INSERT INTO powerdata(p0, p1, p2, p3, p4, p5) VALUES ($1, $2, $3, $4, $5, $6) RETURNING pkey',
+        values: p,
+    };
+    return db.query(query);
+};
+
 export const retrieveRecordByPKey = async (pKeyInt) =>{
     const query = {
         text: 'SELECT * FROM powerdata WHERE pkey = $1',

@@ -14,7 +14,9 @@ export const query = async (text, params) => {
   const start = Date.now()
   const res = await pool.query(text, params)
   const duration = Date.now() - start
-  console.log('executed query', { text, duration, rows: res.rowCount })
+  if (process.env.DB_LOG === '1' || duration > 500) { // `DB_LOG=1 npm run dev`
+    console.log('executed query', { text, duration, rows: res.rowCount })
+  }
   return res
 }
  

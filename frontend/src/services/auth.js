@@ -3,7 +3,7 @@ import { disconnectSocket } from "./socket";
 const TOKEN_KEY = 'em_token';
 const USER_KEY = 'em_user';
 const OAUTH_ERROR_KEY = 'em_oauth_error';
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const OAUTH_ERRORS = {
   google: 'Google sign-in failed or was cancelled. Please try again.',
