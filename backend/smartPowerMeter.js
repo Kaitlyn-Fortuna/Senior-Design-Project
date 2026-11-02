@@ -6,6 +6,7 @@ import spi from "spi-device";
 import onoff from "onoff";
 import fs from "node:fs";
 import i2c from "i2c-bus";
+import os from "node:os";
 const { Gpio } = onoff;
 
 import { insertPowers } from "./src/database/dbAccessMethods.js";
@@ -28,16 +29,11 @@ const NWORDS = 10; // status + 8 channels + CRC
 const FRAME = WORD * NWORDS; // 30 bytes per frame
 const VREF = 1.2; // Internal reference voltage
 
-// Short internal leads to (~+0.00 V)
-const TEST_MODE = process.argv.includes("--test");
-// DC test signal (~+0.16 V)
-const DC_MODE = process.argv.includes("--dc");
-// Prints raw registers
-const DEBUG = process.argv.includes("--debug");
-// Prints raw ADC voltages
-const RAW_VIEW = process.argv.includes("--raw") || TEST_MODE || DC_MODE;
-// Tests LEDs
-const LED_TEST = process.argv.includes("--leds");
+const TEST_MODE = process.argv.includes("--test"); // Short internal leads to (~+0.00 V)
+const DC_MODE = process.argv.includes("--dc"); // DC test signal (~+0.16 V)
+const DEBUG = process.argv.includes("--debug"); // Prints raw registers
+const RAW_VIEW = process.argv.includes("--raw") || TEST_MODE || DC_MODE; // Prints raw ADC voltages
+const LED_TEST = process.argv.includes("--leds"); // Tests LEDs
 
 // ADC channel -> board input
 const CHANNELS = [
@@ -51,33 +47,33 @@ const CHANNELS = [
   { name: "VS2", pin: "AIN7" },
 ];
 
-let cfg = loadDeviceConfig();
+let cfg = loadDeviceConfig(); // Load config from JSON file
 let SCALE = []; // ADC volts -> amps (ch 0-5) or line volts (ch 6-7)
 let CT_VS = []; // Voltage sensor for each CT (0 = v0, 1 = v1)
 let GAINS = []; // ADC gain per channel (c0-c5, v0, v1)
 let V_ON = 0; // Minimum voltage to light an LED
 let I_ON = 0; // Minimum current to light an LED
-let V_FLOOR = 0; // Database: voltages below this are saved as 0
-let C_FLOOR = 0; // Database: currents below this are saved as 0
-let P_FLOOR = 0; // Database: power below this is saved as 0
+let V_FLOOR = 0; // Minimum voltage to save to database
+let C_FLOOR = 0; // Minimum current to save to database
+let P_FLOOR = 0; // Minimum power to save to database
 let INSERT_SECONDS = 1; // Database insert interval in seconds
+deriveSettings(cfg); // Derice settings from config file and store in global variables
 
-function deriveSettings(c) {
-  const on = (k) => (c.inputs[k].enabled ? 1 : 0);
+function deriveSettings(config) {
+  const on = (k) => (config.inputs[k].enabled ? 1 : 0);
   SCALE = [
-    ...CURRENT_KEYS.map((k) => ampsPerVolt(c, k) * on(k)),
-    ...VOLTAGE_KEYS.map((k) => voltsPerVolt(c, k) * on(k)),
+    ...CURRENT_KEYS.map((k) => ampsPerVolt(config, k) * on(k)),
+    ...VOLTAGE_KEYS.map((k) => voltsPerVolt(config, k) * on(k)),
   ];
-  CT_VS = CURRENT_KEYS.map((k) => VOLTAGE_KEYS.indexOf(c.inputs[k].voltage_sensor));
-  GAINS = channelGains(c);
-  V_ON = c.leds.min_voltage;
-  I_ON = c.leds.min_current;
-  V_FLOOR = c.database.min_voltage;
-  C_FLOOR = c.database.min_current;
-  P_FLOOR = c.database.min_power;
-  INSERT_SECONDS = c.database.insert_seconds;
+  CT_VS = CURRENT_KEYS.map((k) => VOLTAGE_KEYS.indexOf(config.inputs[k].voltage_sensor));
+  GAINS = channelGains(config);
+  V_ON = config.leds.min_voltage;
+  I_ON = config.leds.min_current;
+  V_FLOOR = config.database.min_voltage;
+  C_FLOOR = config.database.min_current;
+  P_FLOOR = config.database.min_power;
+  INSERT_SECONDS = config.database.insert_seconds;
 }
-deriveSettings(cfg);
 
 const LED_ADDR = 0x60; // A0-A2 tied to GND
 const LED_CMD_WRITE = 0x44; // load shift register + latch to outputs
@@ -145,13 +141,20 @@ function gpioBase() {
   } catch {}
   return 0;
 }
+
+try {
+  checkOS();
+} catch (e) {
+  console.error(`Error checking OS: ${e.message}`);
+  process.exit(1);
+}
+
 const base = gpioBase();
 
 const dev = spi.openSync(0, 0, { mode: spi.MODE1, maxSpeedHz: SPI_HZ }); // MODE1 = CPOL0, CPHA1
 const resetPin = new Gpio(base + RESET_PIN, "high");
 const drdy = new Gpio(base + DRDY_PIN, "in", "falling");
 
-// One full frame. `words` = 16-bit values placed MSB-first in each 24-bit slot.
 function xfer(words = []) {
   const tx = Buffer.alloc(FRAME),
     rx = Buffer.alloc(FRAME);
@@ -164,7 +167,9 @@ function xfer(words = []) {
   ]);
   return rx;
 }
+
 const word16 = (rx, i) => (rx[i * WORD] << 8) | rx[i * WORD + 1];
+
 function s24(rx, i) {
   let v = (rx[i * WORD] << 16) | (rx[i * WORD + 1] << 8) | rx[i * WORD + 2];
   return v & 0x800000 ? v - 0x1000000 : v;
@@ -174,6 +179,7 @@ function readReg(addr) {
   xfer([RREG(addr)]);
   return word16(xfer([CMD.NULL]), 0);
 }
+
 function writeReg(addr, val) {
   xfer([WREG(addr), val]);
   const ack = word16(xfer([CMD.NULL]), 0);
@@ -182,14 +188,28 @@ function writeReg(addr, val) {
       `WREG 0x${addr.toString(16)} not acked (got 0x${ack.toString(16)})`,
     );
 }
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const gainCode = (g) => Math.log2(g);
+
 function writeGains() {
   const pack = (a) =>
     a.reduce((acc, g, i) => acc | (gainCode(g) << (4 * i)), 0);
   writeReg(REG.GAIN1, pack(GAINS.slice(0, 4)));
   writeReg(REG.GAIN2, pack(GAINS.slice(4, 8)));
+}
+
+function checkOS() {
+  const platform = os.platform();
+  if (platform !== "linux") {
+    throw new Error(`Unsupported platform: ${platform}`);
+  }
+  const arch = os.arch();
+  if (arch !== "arm" && arch !== "arm64") {
+    throw new Error(`Unsupported architecture: ${arch}`);
+  }
+  return true;
 }
 
 async function init() {
@@ -302,6 +322,7 @@ async function main() {
     bus?.closeSync();
     process.exit(0);
   }
+
   await init();
 
   drdy.watch((err) => {
