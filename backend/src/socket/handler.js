@@ -1,5 +1,5 @@
 import {config} from '../config.js'
-import {retrieveNewestRecord, retrieveRecentRecords} from '../database/dbAccessMethods.js'
+import {retrieveNewestRecord, retrieveRecentRecords, queryPowerData} from '../database/dbAccessMethods.js'
 
 const MAX_RECORDS = 48;
 
@@ -62,10 +62,31 @@ export const initializeSocketHandlers = (io) =>
                     pollInProgress = false;
                 }
         }
+        const handlePowerQuery = async (socket, queryParams = {}) => {
+            try {
+                console.log('Received power:query with params:', queryParams);
+                const records = await queryPowerData(queryParams);
+                const readings = records.map(serializeReadings);
+                socket.emit('power:query_result', {
+                    params: queryParams,
+                    readings,
+                });
+                console.log('Sent', readings.length, 'query results to client');
+            } catch (error) {
+                console.error('Error handling power:query: ', error);
+                socket.emit('power:query_result', {
+                    params: queryParams,
+                    readings: [],
+                    error: 'Failed to retrieve power records for query',
+                });
+            }
+        };
+
             io.on('connection', (socket) => {
                 sendReadings(socket);
                 handleConnection(socket);
                 socket.on('power:refresh', () => sendReadings(socket));
+                socket.on('power:query', (params) => handlePowerQuery(socket, params));
                 socket.on('disconnect', (reason) => handleDisconnect(socket, reason));            
                 socket.on('error', (error) => handleError(socket, error));
             });

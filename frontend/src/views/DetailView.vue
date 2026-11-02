@@ -1,15 +1,13 @@
 <script setup>
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { getUser } from "@/services/auth";
-import {
-  getDevices,
-  generateTimeSeriesData,
-  formatDateForInput,
-} from "@/services/deviceData";
+import { connectSocket } from "@/services/socket";
+import { getDevices, formatDateForInput } from "@/services/deviceData";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Card,
   CardContent,
@@ -67,6 +65,7 @@ import {
   ChevronsLeftIcon,
   ChevronsRightIcon,
   FilterIcon,
+  RefreshCwIcon,
   RotateCcwIcon,
   SlidersHorizontalIcon,
 } from "@lucide/vue";
@@ -81,22 +80,16 @@ const devices = ref(getDevices());
 // Selected device keys for filtering (defaults to all devices)
 const selectedDeviceKeys = ref(devices.value.map((d) => d.key));
 
-onMounted(() => {
-  const currentDevices = getDevices();
-  devices.value = currentDevices;
-  if (selectedDeviceKeys.value.length === 0) {
-    selectedDeviceKeys.value = currentDevices.map((d) => d.key);
-  }
-});
-
 // Active devices based on filter selection
 const activeDevices = computed(() =>
-  devices.value.filter((d) => selectedDeviceKeys.value.includes(d.key))
+  devices.value.filter((d) => selectedDeviceKeys.value.includes(d.key)),
 );
 
 function toggleDevice(key) {
   if (selectedDeviceKeys.value.includes(key)) {
-    selectedDeviceKeys.value = selectedDeviceKeys.value.filter((k) => k !== key);
+    selectedDeviceKeys.value = selectedDeviceKeys.value.filter(
+      (k) => k !== key,
+    );
   } else {
     selectedDeviceKeys.value = [...selectedDeviceKeys.value, key];
   }
@@ -113,11 +106,11 @@ function deselectAllDevices() {
 // Collapsible filter panel state (default open)
 const isFilterOpen = ref(true);
 
-// Date range state (defaults to past 7 days up to today)
+// Date range state (defaults to past 2 days / 48 hours up to today)
 const today = new Date();
 const todayDateStr = formatDateForInput(today);
 const defaultStartDate = formatDateForInput(
-  new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
+  new Date(today.getTime() - 2 * 24 * 60 * 60 * 1000),
 );
 const customStartDate = ref(defaultStartDate);
 const customEndDate = ref(todayDateStr);
@@ -163,17 +156,101 @@ const activeRangeLabel = computed(() => {
   return `${customStartDate.value} to ${customEndDate.value}`;
 });
 
-// Raw generated 15-minute time-series data based on the active date range
+// Socket & Query state
+let socket = null;
+const isLoading = ref(false);
+const rawReadings = ref([]);
+
+/**
+ * Sends a power:query event with current date range and selected port indices.
+ */
+function queryData() {
+  if (!socket || isDateRangeInvalid.value) return;
+
+  const startIso = new Date(`${customStartDate.value}T00:00:00`).toISOString();
+  const endIso = new Date(`${customEndDate.value}T23:59:59.999`).toISOString();
+
+  // Selected ports (e.g. "port0" -> 0)
+  const ports = activeDevices.value.map((d) => d.port);
+
+  isLoading.value = true;
+  socket.emit("power:query", {
+    startDate: startIso,
+    endDate: endIso,
+    ports,
+  });
+}
+
+function handleQueryResult(data) {
+  isLoading.value = false;
+  if (data && Array.isArray(data.readings)) {
+    rawReadings.value = data.readings;
+  } else {
+    rawReadings.value = [];
+  }
+}
+
+// Automatically re-query when filter criteria change
+watch([customStartDate, customEndDate, selectedDeviceKeys], () => {
+  queryData();
+});
+
+onMounted(() => {
+  const currentDevices = getDevices();
+  devices.value = currentDevices;
+  if (selectedDeviceKeys.value.length === 0) {
+    selectedDeviceKeys.value = currentDevices.map((d) => d.key);
+  }
+
+  socket = connectSocket();
+  socket.on("power:query_result", handleQueryResult);
+
+  // Initial query with default parameters (last 2 days, all 6 ports)
+  queryData();
+});
+
+onUnmounted(() => {
+  if (socket) {
+    socket.off("power:query_result", handleQueryResult);
+  }
+});
+
+// Parse backend readings into structured chart & table points
 const timeSeriesData = computed(() => {
-  if (isDateRangeInvalid.value) return [];
-  return generateTimeSeriesData(
-    {
-      mode: "custom",
-      startDate: customStartDate.value,
-      endDate: customEndDate.value,
-    },
-    devices.value
-  );
+  return rawReadings.value.map((reading, index) => {
+    const pointTime = new Date(reading.timestamp);
+    const dateStr = pointTime.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+    const timeStr = pointTime.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    const formattedTime = `${dateStr}, ${timeStr}`;
+
+    const point = {
+      index,
+      id: reading.id,
+      timestamp: pointTime.getTime(),
+      formattedTime,
+      dateStr,
+      timeStr,
+    };
+
+    devices.value.forEach((device) => {
+      const portWatt = reading.ports?.[device.port] ?? 0;
+      point[device.key] = Number((portWatt / 1000).toFixed(2));
+    });
+
+    const activeTotalWatts = activeDevices.value.reduce(
+      (sum, d) => sum + (reading.ports?.[d.port] ?? 0),
+      0,
+    );
+    point.total = Number((activeTotalWatts / 1000).toFixed(2));
+
+    return point;
+  });
 });
 
 // Dynamic Chart Configuration based ONLY on active devices
@@ -231,7 +308,7 @@ const sortedTableData = computed(() => {
 function getRowTotal(row) {
   const sum = activeDevices.value.reduce(
     (acc, device) => acc + (Number(row[device.key]) || 0),
-    0
+    0,
   );
   return Number(sum.toFixed(2));
 }
@@ -242,7 +319,7 @@ const currentPage = ref(1);
 const pageInput = ref(1);
 
 const totalPages = computed(() =>
-  Math.max(1, Math.ceil(sortedTableData.value.length / pageSize.value))
+  Math.max(1, Math.ceil(sortedTableData.value.length / pageSize.value)),
 );
 
 const paginatedTableData = computed(() => {
@@ -256,16 +333,9 @@ watch(currentPage, (val) => {
 });
 
 // Reset page when any filter changes
-watch(
-  [
-    customStartDate,
-    customEndDate,
-    selectedDeviceKeys,
-  ],
-  () => {
-    currentPage.value = 1;
-  }
-);
+watch([customStartDate, customEndDate, selectedDeviceKeys], () => {
+  currentPage.value = 1;
+});
 
 function onPageChange(e) {
   const raw = e?.target ? e.target.value : pageInput.value;
@@ -302,7 +372,9 @@ function nextPage() {
 </script>
 
 <template>
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-7 pb-12 flex flex-col gap-6 w-full">
+  <div
+    class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-7 pb-12 flex flex-col gap-6 w-full"
+  >
     <!-- Page Header -->
     <header class="flex flex-col gap-4">
       <div class="flex items-center justify-between">
@@ -311,16 +383,20 @@ function nextPage() {
           Back to Dashboard
         </Button>
         <span v-if="user" class="text-sm text-muted-foreground">
-          Logged in as <strong class="text-foreground">{{ user.username }}</strong>
+          Logged in as
+          <strong class="text-foreground">{{ user.username }}</strong>
         </span>
       </div>
 
       <div class="flex flex-col gap-1 border-b border-border/50 pb-5">
-        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-foreground m-0">
+        <h1
+          class="text-2xl sm:text-3xl font-bold tracking-tight text-foreground m-0"
+        >
           Power Usage Details
         </h1>
         <p class="text-sm text-muted-foreground m-0">
-          15-minute interval power consumption analysis with customizable date ranges and device filters.
+          15-minute interval power consumption analysis with customizable date
+          ranges and device filters.
         </p>
       </div>
     </header>
@@ -329,11 +405,15 @@ function nextPage() {
     <Collapsible v-model:open="isFilterOpen" class="w-full">
       <Card class="w-full">
         <CardHeader class="pb-3">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div
+            class="flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+          >
             <div class="flex items-center gap-2">
               <FilterIcon class="text-primary size-4" />
               <div>
-                <CardTitle class="text-base sm:text-lg">Filter & Focus Readings</CardTitle>
+                <CardTitle class="text-base sm:text-lg"
+                  >Filter & Focus Readings</CardTitle
+                >
                 <CardDescription class="text-xs sm:text-sm">
                   Specify a date range and select monitored devices to inspect.
                 </CardDescription>
@@ -341,6 +421,18 @@ function nextPage() {
             </div>
 
             <div class="flex items-center gap-2 self-start sm:self-auto">
+              <!-- Rerun Report Button (Always visible regardless of collapse state) -->
+              <Button
+                variant="default"
+                size="sm"
+                :disabled="isLoading || isDateRangeInvalid"
+                @click="queryData"
+              >
+                <Spinner v-if="isLoading" class="size-3.5" />
+                <RefreshCwIcon v-else data-icon="inline-start" />
+                Refresh
+              </Button>
+
               <Button
                 v-if="isFilterModified"
                 variant="outline"
@@ -365,7 +457,9 @@ function nextPage() {
           </div>
 
           <!-- Active Filter Summary (Always visible in the header for immediate glanceability) -->
-          <div class="flex flex-wrap items-center gap-2 pt-2.5 text-xs text-muted-foreground">
+          <div
+            class="flex flex-wrap items-center gap-2 pt-2.5 text-xs text-muted-foreground"
+          >
             <span class="font-medium text-foreground">Active Filters:</span>
             <Badge variant="secondary" class="gap-1 font-normal">
               <CalendarIcon class="size-3" />
@@ -373,21 +467,37 @@ function nextPage() {
             </Badge>
             <Badge variant="secondary" class="gap-1 font-normal">
               <SlidersHorizontalIcon class="size-3" />
-              <span>{{ activeDevices.length }} of {{ devices.length }} devices</span>
+              <span
+                >{{ activeDevices.length }} of
+                {{ devices.length }} devices</span
+              >
             </Badge>
             <Badge variant="outline" class="font-mono text-xs">
-              {{ timeSeriesData.length }} intervals
+              {{ timeSeriesData.length }} readings
             </Badge>
+            <div
+              v-if="isLoading"
+              class="flex items-center gap-1.5 text-primary text-xs ml-auto"
+            >
+              <Spinner class="size-3.5" />
+              <span>Updating...</span>
+            </div>
           </div>
         </CardHeader>
 
         <!-- Detailed Filter Controls (Collapsible) -->
         <CollapsibleContent>
-          <CardContent class="flex flex-col gap-4 pt-3 border-t border-border/50">
+          <CardContent
+            class="flex flex-col gap-4 pt-3 border-t border-border/50"
+          >
             <!-- Date Range Filter Row -->
             <div class="flex flex-col gap-2.5">
-              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <div
+                class="flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+              >
+                <span
+                  class="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                >
                   Date Range
                 </span>
 
@@ -432,8 +542,13 @@ function nextPage() {
               </div>
 
               <!-- Date Input Fields -->
-              <FieldGroup class="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
-                <Field :data-invalid="isDateRangeInvalid" class="w-full sm:w-48">
+              <FieldGroup
+                class="flex flex-col sm:flex-row gap-3 items-start sm:items-end"
+              >
+                <Field
+                  :data-invalid="isDateRangeInvalid"
+                  class="w-full sm:w-48"
+                >
                   <FieldLabel for="start-date" class="text-xs">
                     Start Date
                   </FieldLabel>
@@ -447,7 +562,10 @@ function nextPage() {
                   />
                 </Field>
 
-                <Field :data-invalid="isDateRangeInvalid" class="w-full sm:w-48">
+                <Field
+                  :data-invalid="isDateRangeInvalid"
+                  class="w-full sm:w-48"
+                >
                   <FieldLabel for="end-date" class="text-xs">
                     End Date
                   </FieldLabel>
@@ -472,9 +590,13 @@ function nextPage() {
 
             <!-- Monitored Devices Filter Row (Direct Inline Badges) -->
             <div class="flex flex-col gap-2.5">
-              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div
+                class="flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+              >
                 <div class="flex items-center gap-2">
-                  <span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <span
+                    class="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                  >
                     Monitored Devices
                   </span>
                   <Badge variant="secondary" class="font-mono text-xs">
@@ -514,7 +636,7 @@ function nextPage() {
                       'inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium border transition-all cursor-pointer',
                       selectedDeviceKeys.includes(device.key)
                         ? 'bg-card text-foreground border-border shadow-xs hover:border-primary/50'
-                        : 'bg-muted/40 text-muted-foreground border-transparent opacity-50 line-through hover:opacity-75'
+                        : 'bg-muted/40 text-muted-foreground border-transparent opacity-50 line-through hover:opacity-75',
                     )
                   "
                   :aria-pressed="selectedDeviceKeys.includes(device.key)"
@@ -547,21 +669,44 @@ function nextPage() {
     <main class="flex flex-col gap-6 w-full">
       <!-- 1. Chart Section (Full Width) -->
       <Card class="w-full">
-        <CardHeader class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <CardHeader
+          class="flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+        >
           <div>
             <CardTitle>Device Power Usage Trends</CardTitle>
             <CardDescription>
-              Power trends over time on 15-minute increments for selected devices.
+              Power trends over time on 15-minute increments for selected
+              devices.
             </CardDescription>
           </div>
-          <Badge variant="secondary" class="self-start sm:self-auto font-mono">
-            {{ timeSeriesData.length }} data points
-          </Badge>
+          <div class="flex items-center gap-2 self-start sm:self-auto">
+            <div
+              v-if="isLoading"
+              class="flex items-center gap-1.5 text-xs text-muted-foreground mr-1"
+            >
+              <Spinner class="size-3.5 text-primary" />
+              <span>Fetching data...</span>
+            </div>
+            <Badge variant="secondary" class="font-mono">
+              {{ timeSeriesData.length }} data points
+            </Badge>
+          </div>
         </CardHeader>
         <CardContent class="flex flex-col gap-4">
+          <!-- Loading State for Chart -->
+          <div
+            v-if="isLoading"
+            class="h-72 border border-border/50 rounded-lg flex flex-col items-center justify-center gap-3 bg-muted/10"
+          >
+            <Spinner class="size-8 text-primary" />
+            <p class="text-sm text-muted-foreground animate-pulse">
+              Loading power data from server...
+            </p>
+          </div>
+
           <!-- Empty State when no devices are selected -->
           <Empty
-            v-if="activeDevices.length === 0"
+            v-else-if="activeDevices.length === 0"
             class="h-72 border border-dashed border-border rounded-lg"
           >
             <EmptyMedia variant="icon">
@@ -570,7 +715,8 @@ function nextPage() {
             <EmptyHeader>
               <EmptyTitle>No devices selected</EmptyTitle>
               <EmptyDescription>
-                Select one or more devices in the filter panel above to display consumption trends.
+                Select one or more devices in the filter panel above to display
+                consumption trends.
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
@@ -645,7 +791,9 @@ function nextPage() {
             </ChartContainer>
 
             <!-- Interactive Device Legend (Clicking any legend item toggles it) -->
-            <div class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 pt-3 border-t border-border/50 text-xs">
+            <div
+              class="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 pt-3 border-t border-border/50 text-xs"
+            >
               <button
                 v-for="device in devices"
                 :key="device.key"
@@ -653,7 +801,8 @@ function nextPage() {
                 :class="
                   cn(
                     'flex items-center gap-2 cursor-pointer transition-opacity rounded-sm px-1 py-0.5',
-                    !selectedDeviceKeys.includes(device.key) && 'opacity-40 line-through'
+                    !selectedDeviceKeys.includes(device.key) &&
+                      'opacity-40 line-through',
                   )
                 "
                 :title="
@@ -667,7 +816,9 @@ function nextPage() {
                   class="size-2.5 rounded-full shrink-0"
                   :style="{ backgroundColor: device.color }"
                 />
-                <span class="text-muted-foreground font-medium hover:text-foreground">
+                <span
+                  class="text-muted-foreground font-medium hover:text-foreground"
+                >
                   {{ device.label }}
                 </span>
               </button>
@@ -678,17 +829,20 @@ function nextPage() {
 
       <!-- 2. Table Section (Full Width, below Chart) -->
       <Card class="w-full">
-        <CardHeader class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <CardHeader
+          class="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        >
           <div>
             <CardTitle>Readings Data Table</CardTitle>
             <CardDescription>
-              15-minute interval power consumption for currently active devices matching the chart.
+              15-minute interval power consumption for currently active devices
+              matching the chart.
             </CardDescription>
           </div>
           <div class="flex items-center gap-2">
             <Button variant="outline" size="sm" @click="toggleSort">
               <ArrowUpDownIcon data-icon="inline-start" />
-              {{ sortOrder === 'desc' ? 'Newest First' : 'Oldest First' }}
+              {{ sortOrder === "desc" ? "Newest First" : "Oldest First" }}
             </Button>
           </div>
         </CardHeader>
@@ -713,7 +867,9 @@ function nextPage() {
                         <span>{{ device.label }}</span>
                       </div>
                     </TableHead>
-                    <TableHead class="text-right font-semibold min-w-28">Total (kW)</TableHead>
+                    <TableHead class="text-right font-semibold min-w-28"
+                      >Total (kW)</TableHead
+                    >
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -721,7 +877,9 @@ function nextPage() {
                     v-for="row in paginatedTableData"
                     :key="row.timestamp"
                   >
-                    <TableCell class="font-medium whitespace-nowrap text-foreground">
+                    <TableCell
+                      class="font-medium whitespace-nowrap text-foreground"
+                    >
                       {{ row.formattedTime }}
                     </TableCell>
                     <!-- Dynamic columns matching each ACTIVE device -->
@@ -733,21 +891,43 @@ function nextPage() {
                       {{ row[device.key] }} kW
                     </TableCell>
                     <!-- Row total summing active devices -->
-                    <TableCell class="text-right font-mono font-medium text-foreground">
+                    <TableCell
+                      class="text-right font-mono font-medium text-foreground"
+                    >
                       {{ getRowTotal(row) }} kW
                     </TableCell>
                   </TableRow>
 
+                  <!-- Loading state for table -->
+                  <TableRow v-if="isLoading">
+                    <TableCell
+                      :colspan="activeDevices.length + 2"
+                      class="h-28 text-center text-muted-foreground"
+                    >
+                      <div class="flex items-center justify-center gap-2">
+                        <Spinner class="size-4 text-primary" />
+                        <span>Loading power records...</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+
                   <!-- Empty state for no active devices -->
-                  <TableRow v-if="activeDevices.length === 0">
-                    <TableCell :colspan="devices.length + 2" class="h-28 text-center text-muted-foreground">
-                      No devices selected. Select at least one device in the filter panel above to display readings.
+                  <TableRow v-else-if="activeDevices.length === 0">
+                    <TableCell
+                      :colspan="devices.length + 2"
+                      class="h-28 text-center text-muted-foreground"
+                    >
+                      No devices selected. Select at least one device in the
+                      filter panel above to display readings.
                     </TableCell>
                   </TableRow>
 
                   <!-- Empty state for no data rows -->
                   <TableRow v-else-if="paginatedTableData.length === 0">
-                    <TableCell :colspan="activeDevices.length + 2" class="h-24 text-center text-muted-foreground">
+                    <TableCell
+                      :colspan="activeDevices.length + 2"
+                      class="h-24 text-center text-muted-foreground"
+                    >
                       No data available for this range.
                     </TableCell>
                   </TableRow>
@@ -756,11 +936,17 @@ function nextPage() {
             </div>
           </div>
         </CardContent>
-        <CardFooter class="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-border/50 pt-4">
+        <CardFooter
+          class="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-border/50 pt-4"
+        >
           <div class="text-xs text-muted-foreground">
             Showing
             <strong class="font-medium text-foreground">
-              {{ sortedTableData.length === 0 ? 0 : (currentPage - 1) * pageSize + 1 }}
+              {{
+                sortedTableData.length === 0
+                  ? 0
+                  : (currentPage - 1) * pageSize + 1
+              }}
             </strong>
             to
             <strong class="font-medium text-foreground">
@@ -799,7 +985,9 @@ function nextPage() {
             </Button>
 
             <!-- Page Number Input in between -->
-            <div class="flex items-center gap-1.5 text-xs text-muted-foreground px-1">
+            <div
+              class="flex items-center gap-1.5 text-xs text-muted-foreground px-1"
+            >
               <span>Page</span>
               <Input
                 v-model="pageInput"
