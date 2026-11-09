@@ -7,6 +7,7 @@ import { setupPassport } from './auth/passport.js';
 import authRoutes from './auth/routes.js';
 import { Server } from 'socket.io';
 import { initializeSocketHandlers } from './socket/handler.js';
+import chatRoutes from './chat/routes.js';
 
 
 const app = express();
@@ -47,3 +48,4 @@ server.listen(config.port, () => {
   console.log(`Backend listening on http://localhost:${config.port}`);
 });
 
+app.use('/api/chat', chatRoutes);
