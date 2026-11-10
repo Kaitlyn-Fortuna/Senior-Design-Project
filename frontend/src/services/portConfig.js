@@ -35,8 +35,18 @@ export function saveSavedPortNames(names) {
 }
 
 /**
+ * Default name for an input key from device-configuration.json
+ * ("c0" -> "Current Clamp 0", "v1" -> "Voltage Sensor 1").
+ */
+export function defaultInputName(key) {
+  const n = key.slice(1);
+  return key.startsWith("v") ? `Voltage Sensor ${n}` : `Current Clamp ${n}`;
+}
+
+/**
  * Resolves the display name for a given port index (0-7).
- * If a port has no saved name or it is blank, defaults to "Port N" where N is the port number.
+ * Ports 0-5 are current inputs c0-c5, ports 6-7 are voltage inputs v0-v1.
+ * Blank or missing names fall back to defaultInputName().
  *
  * @param {number} portIndex - The hardware port index (0 through 7)
  * @returns {string} The resolved display name
@@ -47,5 +57,5 @@ export function getPortDisplayName(portIndex) {
   if (name && typeof name === "string" && name.trim().length > 0) {
     return name.trim();
   }
-  return `Port ${portIndex}`;
+  return defaultInputName(portIndex < 6 ? `c${portIndex}` : `v${portIndex - 6}`);
 }
