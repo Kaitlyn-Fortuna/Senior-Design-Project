@@ -28,14 +28,7 @@ CREATE TABLE powerdata (
 	p2				real		DEFAULT 0.0,
 	p3				real		DEFAULT 0.0,
 	p4				real		DEFAULT 0.0,
-	p5				real		DEFAULT 0.0,
-	-- Power Factors
-	pf0				real		DEFAULT 0.0,
-	pf1				real		DEFAULT 0.0,
-	pf2				real		DEFAULT 0.0,
-	pf3				real		DEFAULT 0.0,
-	pf4				real		DEFAULT 0.0,
-	pf5				real		DEFAULT 0.0
+	p5				real		DEFAULT 0.0
 );
 CREATE INDEX powerdata_tStamp_idx ON powerdata (tStamp);
 CREATE INDEX powerdata_isConsolidated_idx ON powerdata (isConsolidated);
