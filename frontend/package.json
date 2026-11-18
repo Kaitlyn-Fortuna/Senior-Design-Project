@@ -18,7 +18,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "reka-ui": "^2.11.0",
-    "shadcn-vue": "^2.8.2",
+    "shadcn-vue": "^2.9.0",
     "socket.io-client": "^4.8.1",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
