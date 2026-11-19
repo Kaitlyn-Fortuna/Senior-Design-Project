@@ -1,26 +1,39 @@
 import * as db from './index.js'
 
-export const insertRecord = async (currents = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], voltages = [0.0, 0.0], associations = [0, 0, 0, 0, 0, 0], powerprice = 0.0) => {
+export const insertRecord = async (currents = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], voltages = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], apparentPowers = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], realPowers = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], powerFactors = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], powerprice = 0.0) => {
     //arrays that will contain values to push to db
-    let iArray = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let vArray = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-    let pArray = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let currentArray = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let voltageArray = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let apparentPowerArray = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let realPowerArray = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let powerFactorArray = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 
     //loop to fill arrays
     for(let i = 0; i < 6; i++){
-
-        //fill iArray
+        //fill currentArray
         let current = 0.0;
         if(i < currents.length){current = currents[i]};
-        iArray[i] = current;
+        currentArray[i] = current;
 
-        //fill vArray
+        //fill voltageArray
         let voltage = 0.0;
-        if(i < associations.length && associations[i] < voltages.length){voltage = voltages[associations[i]]};
-        vArray[i] = voltage
+        if(i < voltages.length){voltage = voltages[i]};
+        voltageArray[i] = voltage
 
-        //fill pArray
-        pArray[i] = current * voltage;
+        //fill apparentPowerArray
+        let apparentPower = 0.0;
+        if(i < apparentPowers.length){apparentPower = apparentPowers[i]};
+        apparentPowerArray[i] = apparentPower;
+
+        //fill realPowerArray
+        let realPower = 0.0;
+        if(i < realPowers.length){realPower = realPowers[i]};
+        realPowerArray[i] = realPower;
+
+        //fill powerFactorArray
+        let powerFactor = 0.0;
+        if(i < powerFactors.length){powerFactor = powerFactors[i]};
+        powerFactorArray[i] = powerFactor;
     }
 
     //build the sql query with the calculated values
@@ -30,19 +43,25 @@ export const insertRecord = async (currents = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vo
         'i0, i1, i2, i3, i4, i5, ' + 
         'v0, v1, v2, v3, v4, v5, ' + 
         'p0, p1, p2, p3, p4, p5, ' + 
+        's0, s1, s2, s3, s4, s5, ' + 
+        'pf0, pf1, pf2, pf3, pf4, pf5, ' +
         'powerprice' +
         ') ' + 
         'VALUES (' +
         '$1, $2, $3, $4, $5, $6,' + 
         '$7, $8, $9, $10, $11, $12,' +
         '$13, $14, $15, $16, $17, $18,' +
-        '$19' +
+        '$19, $20, $21, $22, $23, $24, ' +
+        '$25, $26, $27, $28, $29, $30, ' +
+        '$31' +
         ') ' + 
         'RETURNING pkey',
     values: [
-        iArray[0], iArray[1], iArray[2], iArray[3], iArray[4], iArray[5],
-        vArray[0], vArray[1], vArray[2], vArray[3], vArray[4], vArray[5],
-        pArray[0], pArray[1], pArray[2], pArray[3], pArray[4], pArray[5],
+        currentArray[0], currentArray[1], currentArray[2], currentArray[3], currentArray[4], currentArray[5],
+        voltageArray[0], voltageArray[1], voltageArray[2], voltageArray[3], voltageArray[4], voltageArray[5],
+        realPowerArray[0], realPowerArray[1], realPowerArray[2], realPowerArray[3], realPowerArray[4], realPowerArray[5],
+        apparentPowerArray[0], apparentPowerArray[1], apparentPowerArray[2], apparentPowerArray[3], apparentPowerArray[4], apparentPowerArray[5],
+        powerFactorArray[0], powerFactorArray[1], powerFactorArray[2], powerFactorArray[3], powerFactorArray[4], powerFactorArray[5],
         powerprice
     ]
     };
@@ -51,8 +70,8 @@ export const insertRecord = async (currents = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vo
     const result = await db.query(query);
 
     //print resulting row to console
-    console.log(result.rows[0]);
     /*
+    console.log(result.rows[0]);
     console.log(iArray);
     console.log(vArray);
     console.log(pArray);
@@ -61,14 +80,6 @@ export const insertRecord = async (currents = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vo
     //return
     return result;
 }
-
-export const insertPowers = async (p) => {
-    const query = {
-        text: 'INSERT INTO powerdata(p0, p1, p2, p3, p4, p5) VALUES ($1, $2, $3, $4, $5, $6) RETURNING pkey',
-        values: p,
-    };
-    return db.query(query);
-};
 
 export const retrieveRecordByPKey = async (pKeyInt) =>{
     const query = {

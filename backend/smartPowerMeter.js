@@ -9,7 +9,7 @@ import i2c from "i2c-bus";
 import os from "node:os";
 const { Gpio } = onoff;
 
-import { insertPowers } from "./src/database/dbAccessMethods.js";
+import { insertRecord } from "./src/database/dbAccessMethods.js";
 import {
   loadDeviceConfig,
   watchDeviceConfig,
@@ -21,13 +21,27 @@ import {
   CONFIG_PATH,
 } from "./src/deviceConfig.js";
 
-const DRDY_PIN = 25; // Data ready pin
-const RESET_PIN = 24; // Reset pin
-const SPI_HZ = 8_000_000; // SPI clock speed (max 25MHz) (1 bit per cycle)
-const WORD = 3; // 24-bit words
-const NWORDS = 10; // status + 8 channels + CRC
-const FRAME = WORD * NWORDS; // 30 bytes per frame
-const VREF = 1.2; // Internal reference voltage
+// ---------------------------------------------------------------------------
+// Hardware constants
+// ---------------------------------------------------------------------------
+
+const DATA_READY_PIN = 25; // ADC pulls this low when a new sample is ready
+const RESET_PIN = 24; // Driving this low resets the ADC
+const SPI_CLOCK_HZ = 8_000_000; // SPI clock speed (max 25MHz) (1 bit per cycle)
+const BYTES_PER_WORD = 3; // ADC sends 24-bit words
+const WORDS_PER_FRAME = 10; // status word + 8 channel words + CRC word
+const BYTES_PER_FRAME = BYTES_PER_WORD * WORDS_PER_FRAME; // 30 bytes per frame
+const ADC_REFERENCE_VOLTAGE = 1.2; // Internal reference voltage
+
+// ADC channel layout: channels 0-5 are current transformers, 6-7 are voltage sensors
+const NUM_ADC_CHANNELS = 8;
+const NUM_CURRENT_CHANNELS = 6;
+const NUM_VOLTAGE_SENSORS = 2;
+const FIRST_VOLTAGE_CHANNEL = 6; // ADC channel index of VS1
+
+// ---------------------------------------------------------------------------
+// Command-line flags
+// ---------------------------------------------------------------------------
 
 const TEST_MODE = process.argv.includes("--test"); // Short internal leads to (~+0.00 V)
 const DC_MODE = process.argv.includes("--dc"); // DC test signal (~+0.16 V)
@@ -35,7 +49,10 @@ const DEBUG = process.argv.includes("--debug"); // Prints raw registers
 const RAW_VIEW = process.argv.includes("--raw") || TEST_MODE || DC_MODE; // Prints raw ADC voltages
 const LED_TEST = process.argv.includes("--leds"); // Tests LEDs
 
-// ADC channel -> board input
+// ---------------------------------------------------------------------------
+// ADC Channels
+// ---------------------------------------------------------------------------
+
 const CHANNELS = [
   { name: "CT1", pin: "AIN0" },
   { name: "CT2", pin: "AIN1" },
@@ -47,38 +64,47 @@ const CHANNELS = [
   { name: "VS2", pin: "AIN7" },
 ];
 
-let cfg = loadDeviceConfig(); // Load config from JSON file
-let SCALE = []; // ADC volts -> amps (ch 0-5) or line volts (ch 6-7)
-let CT_VS = []; // Voltage sensor for each CT (0 = v0, 1 = v1)
-let GAINS = []; // ADC gain per channel (c0-c5, v0, v1)
-let V_ON = 0; // Minimum voltage to light an LED
-let I_ON = 0; // Minimum current to light an LED
-let V_FLOOR = 0; // Minimum voltage to save to database
-let C_FLOOR = 0; // Minimum current to save to database
-let P_FLOOR = 0; // Minimum power to save to database
-let INSERT_SECONDS = 1; // Database insert interval in seconds
-deriveSettings(cfg); // Derice settings from config file and store in global variables
+// ---------------------------------------------------------------------------
+// Settings derived from the device config file
+// ---------------------------------------------------------------------------
 
-function deriveSettings(config) {
-  const on = (k) => (config.inputs[k].enabled ? 1 : 0);
-  SCALE = [
-    ...CURRENT_KEYS.map((k) => ampsPerVolt(config, k) * on(k)),
-    ...VOLTAGE_KEYS.map((k) => voltsPerVolt(config, k) * on(k)),
+let deviceConfig = loadDeviceConfig();
+let channelScaleFactors = []; // ADC volts
+let voltageSensorForCurrentChannel = []; // Which voltage sensor each CT is paired with (0 = VS1, 1 = VS2)
+let adcGains = []; // ADC gain per channel (c0-c5, v0, v1)
+let ledMinVoltage = 0; // Minimum voltage to light a voltage LED
+let ledMinCurrent = 0; // Minimum current to light a current LED
+let dbMinVoltage = 0; // Voltages below this are saved as 0
+let dbMinCurrent = 0; // Currents below this are saved as 0
+let dbMinPower = 0; // Real powers below this are saved as 0
+let dbInsertIntervalSeconds = 1; // How often to write a row to the database
+applySettingsFromConfig(deviceConfig);
+
+function applySettingsFromConfig(config) {
+  const enabledMultiplier = (inputKey) => (config.inputs[inputKey].enabled ? 1 : 0);
+  channelScaleFactors = [
+    ...CURRENT_KEYS.map((key) => ampsPerVolt(config, key) * enabledMultiplier(key)),
+    ...VOLTAGE_KEYS.map((key) => voltsPerVolt(config, key) * enabledMultiplier(key)),
   ];
-  CT_VS = CURRENT_KEYS.map((k) => VOLTAGE_KEYS.indexOf(config.inputs[k].voltage_sensor));
-  GAINS = channelGains(config);
-  V_ON = config.leds.min_voltage;
-  I_ON = config.leds.min_current;
-  V_FLOOR = config.database.min_voltage;
-  C_FLOOR = config.database.min_current;
-  P_FLOOR = config.database.min_power;
-  INSERT_SECONDS = config.database.insert_seconds;
+  voltageSensorForCurrentChannel = CURRENT_KEYS.map((key) =>
+    VOLTAGE_KEYS.indexOf(config.inputs[key].voltage_sensor),
+  );
+  adcGains = channelGains(config);
+  ledMinVoltage = config.leds.min_voltage;
+  ledMinCurrent = config.leds.min_current;
+  dbMinVoltage = config.database.min_voltage;
+  dbMinCurrent = config.database.min_current;
+  dbMinPower = config.database.min_power;
+  dbInsertIntervalSeconds = config.database.insert_seconds;
 }
 
-const LED_ADDR = 0x60; // A0-A2 tied to GND
-const LED_CMD_WRITE = 0x44; // load shift register + latch to outputs
-const LED_BIT = {
-  // input -> bit
+// ---------------------------------------------------------------------------
+// LED driver settings
+// ---------------------------------------------------------------------------
+
+const LED_DRIVER_I2C_ADDRESS = 0x60; // A0-A2 tied to GND
+const LED_DRIVER_WRITE_COMMAND = 0x44; // load shift register + latch to outputs
+const LED_BIT_FOR_INPUT = {
   VS1: 3, // D4
   VS2: 2, // D3
   CT1: 1, // D2
@@ -89,9 +115,13 @@ const LED_BIT = {
   CT6: 4, // D5
 };
 
-const CLKIN_HZ = 8_192_000; // External oscillator clock speed
-const OSR = cfg.adc.oversampling_ratio; // Over-sampling ratio (restart to change)
-const OSR_CODES = {
+// ---------------------------------------------------------------------------
+// ADC settings
+// ---------------------------------------------------------------------------
+
+const ADC_CLOCK_HZ = 8_192_000; // External oscillator clock speed
+const OVERSAMPLING_RATIO = deviceConfig.adc.oversampling_ratio; // (restart to change)
+const OVERSAMPLING_RATIO_CODES = {
   128: 0,
   256: 1,
   512: 2,
@@ -101,20 +131,23 @@ const OSR_CODES = {
   8192: 6,
   16256: 7,
 };
-const OSR_CODE = OSR_CODES[OSR];
-const NOMINAL_SPS = CLKIN_HZ / 2 / OSR; // Samples per second per channel
-const REPORT_SECONDS = cfg.adc.report_seconds; // (restart to change) How often to compute and print (multiple of 1/60s [0.1, 0.2, 0.5, 1])
-const BLOCK = Math.round(NOMINAL_SPS * REPORT_SECONDS); // Samples per report
-const SAMPLES_PER_SECOND = Math.round(NOMINAL_SPS); // Debug print rate (1 line/sec)
+const OVERSAMPLING_RATIO_CODE = OVERSAMPLING_RATIO_CODES[OVERSAMPLING_RATIO];
+const NOMINAL_SAMPLES_PER_SECOND = ADC_CLOCK_HZ / 2 / OVERSAMPLING_RATIO; // Per channel
+const REPORT_SECONDS = deviceConfig.adc.report_seconds; // (restart to change) How often to compute and print (multiple of 1/60s [0.1, 0.2, 0.5, 1])
+const SAMPLES_PER_REPORT = Math.round(NOMINAL_SAMPLES_PER_SECOND * REPORT_SECONDS);
+const SAMPLES_PER_SECOND = Math.round(NOMINAL_SAMPLES_PER_SECOND); // Used for 1-line-per-second debug prints
 
-if (OSR_CODE === undefined) {
+if (OVERSAMPLING_RATIO_CODE === undefined) {
   throw new Error(
-    `OSR must be one of ${Object.keys(OSR_CODES).join(", ")} (got ${OSR})`,
+    `OSR must be one of ${Object.keys(OVERSAMPLING_RATIO_CODES).join(", ")} (got ${OVERSAMPLING_RATIO})`,
   );
 }
 
-// Registers
-const REG = {
+// ---------------------------------------------------------------------------
+// ADC registers and commands
+// ---------------------------------------------------------------------------
+
+const REGISTER = {
   ID: 0x00,
   STATUS: 0x01,
   MODE: 0x02,
@@ -124,19 +157,23 @@ const REG = {
   CFG: 0x06,
 };
 
-const CMD = { NULL: 0x0000, RESET: 0x0011, STANDBY: 0x0022, WAKEUP: 0x0033 };
-const RREG = (addr) => 0xa000 | (addr << 7); // read 1 register
-const WREG = (addr) => 0x6000 | (addr << 7); // write 1 register
+const COMMAND = { NULL: 0x0000, RESET: 0x0011, STANDBY: 0x0022, WAKEUP: 0x0033 };
+const readRegisterCommand = (address) => 0xa000 | (address << 7); // read 1 register
+const writeRegisterCommand = (address) => 0x6000 | (address << 7); // write 1 register
 
-function gpioBase() {
+// ---------------------------------------------------------------------------
+// GPIO / SPI setup
+// ---------------------------------------------------------------------------
+
+function findGpioBaseNumber() {
   try {
-    for (const d of fs.readdirSync("/sys/class/gpio")) {
-      if (!d.startsWith("gpiochip")) continue;
-      const label = fs
-        .readFileSync(`/sys/class/gpio/${d}/label`, "utf8")
+    for (const chipDirName of fs.readdirSync("/sys/class/gpio")) {
+      if (!chipDirName.startsWith("gpiochip")) continue;
+      const chipLabel = fs
+        .readFileSync(`/sys/class/gpio/${chipDirName}/label`, "utf8")
         .trim();
-      if (/pinctrl-(bcm2|rp1)/.test(label))
-        return Number(fs.readFileSync(`/sys/class/gpio/${d}/base`, "utf8"));
+      if (/pinctrl-(bcm2|rp1)/.test(chipLabel))
+        return Number(fs.readFileSync(`/sys/class/gpio/${chipDirName}/base`, "utf8"));
     }
   } catch {}
   return 0;
@@ -149,55 +186,58 @@ try {
   process.exit(1);
 }
 
-const base = gpioBase();
+const gpioBaseNumber = findGpioBaseNumber();
 
-const dev = spi.openSync(0, 0, { mode: spi.MODE1, maxSpeedHz: SPI_HZ }); // MODE1 = CPOL0, CPHA1
-const resetPin = new Gpio(base + RESET_PIN, "high");
-const drdy = new Gpio(base + DRDY_PIN, "in", "falling");
+const adcSpiDevice = spi.openSync(0, 0, { mode: spi.MODE1, maxSpeedHz: SPI_CLOCK_HZ }); // MODE1 = CPOL0, CPHA1
+const resetPin = new Gpio(gpioBaseNumber + RESET_PIN, "high");
+const dataReadyPin = new Gpio(gpioBaseNumber + DATA_READY_PIN, "in", "falling");
 
-function xfer(words = []) {
-  const tx = Buffer.alloc(FRAME),
-    rx = Buffer.alloc(FRAME);
-  words.forEach((w, i) => {
-    tx[i * WORD] = (w >> 8) & 0xff;
-    tx[i * WORD + 1] = w & 0xff;
+function spiTransfer(commandWords = []) {
+  const sendBuffer = Buffer.alloc(BYTES_PER_FRAME);
+  const receiveBuffer = Buffer.alloc(BYTES_PER_FRAME);
+  commandWords.forEach((commandWord, wordIndex) => {
+    sendBuffer[wordIndex * BYTES_PER_WORD] = (commandWord >> 8) & 0xff;
+    sendBuffer[wordIndex * BYTES_PER_WORD + 1] = commandWord & 0xff;
   });
-  dev.transferSync([
-    { sendBuffer: tx, receiveBuffer: rx, byteLength: FRAME, speedHz: SPI_HZ },
+  adcSpiDevice.transferSync([
+    { sendBuffer, receiveBuffer, byteLength: BYTES_PER_FRAME, speedHz: SPI_CLOCK_HZ },
   ]);
-  return rx;
+  return receiveBuffer;
 }
 
-const word16 = (rx, i) => (rx[i * WORD] << 8) | rx[i * WORD + 1];
+const readUnsigned16BitWord = (buffer, wordIndex) =>
+  (buffer[wordIndex * BYTES_PER_WORD] << 8) | buffer[wordIndex * BYTES_PER_WORD + 1];
 
-function s24(rx, i) {
-  let v = (rx[i * WORD] << 16) | (rx[i * WORD + 1] << 8) | rx[i * WORD + 2];
-  return v & 0x800000 ? v - 0x1000000 : v;
+function readSigned24BitWord(buffer, wordIndex) {
+  const start = wordIndex * BYTES_PER_WORD;
+  const value = (buffer[start] << 16) | (buffer[start + 1] << 8) | buffer[start + 2];
+  return value & 0x800000 ? value - 0x1000000 : value;
 }
 
-function readReg(addr) {
-  xfer([RREG(addr)]);
-  return word16(xfer([CMD.NULL]), 0);
+function readRegister(address) {
+  spiTransfer([readRegisterCommand(address)]);
+  return readUnsigned16BitWord(spiTransfer([COMMAND.NULL]), 0);
 }
 
-function writeReg(addr, val) {
-  xfer([WREG(addr), val]);
-  const ack = word16(xfer([CMD.NULL]), 0);
-  if (ack !== (0x4000 | (addr << 7)))
+function writeRegister(address, value) {
+  spiTransfer([writeRegisterCommand(address), value]);
+  const acknowledgement = readUnsigned16BitWord(spiTransfer([COMMAND.NULL]), 0);
+  if (acknowledgement !== (0x4000 | (address << 7)))
     throw new Error(
-      `WREG 0x${addr.toString(16)} not acked (got 0x${ack.toString(16)})`,
+      `WREG 0x${address.toString(16)} not acked (got 0x${acknowledgement.toString(16)})`,
     );
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const gainCode = (g) => Math.log2(g);
+const gainToRegisterCode = (gain) => Math.log2(gain);
 
-function writeGains() {
-  const pack = (a) =>
-    a.reduce((acc, g, i) => acc | (gainCode(g) << (4 * i)), 0);
-  writeReg(REG.GAIN1, pack(GAINS.slice(0, 4)));
-  writeReg(REG.GAIN2, pack(GAINS.slice(4, 8)));
+// Each GAIN register holds four 4-bit gain codes (one per channel)
+function writeGainsToAdc() {
+  const packGainCodes = (gains) =>
+    gains.reduce((packed, gain, i) => packed | (gainToRegisterCode(gain) << (4 * i)), 0);
+  writeRegister(REGISTER.GAIN1, packGainCodes(adcGains.slice(0, 4)));
+  writeRegister(REGISTER.GAIN2, packGainCodes(adcGains.slice(4, 8)));
 }
 
 function checkOS() {
@@ -212,7 +252,7 @@ function checkOS() {
   return true;
 }
 
-async function init() {
+async function initializeAdc() {
   // 1. Hardware reset
   resetPin.writeSync(0);
   await sleep(1);
@@ -220,27 +260,28 @@ async function init() {
   await sleep(5);
 
   // 2. Confirm SPI
-  const id = readReg(REG.ID);
-  if (id >> 8 !== 0x28)
+  const chipId = readRegister(REGISTER.ID);
+  if (chipId >> 8 !== 0x28)
     throw new Error(
-      `Bad ID 0x${id.toString(16)}: check wiring, SPI mode, CLKIN`,
+      `Bad ID 0x${chipId.toString(16)}: check wiring, SPI mode, CLKIN`,
     );
 
   // 3. Clear the RESET flag
-  writeReg(REG.MODE, 0x0110);
+  writeRegister(REGISTER.MODE, 0x0110);
 
   // 4. Set gains
-  writeGains();
+  writeGainsToAdc();
 
   // 5. Clock register
-  writeReg(REG.CLOCK, 0xff82 | (OSR_CODE << 2));
+  writeRegister(REGISTER.CLOCK, 0xff82 | (OVERSAMPLING_RATIO_CODE << 2));
 
   // 6. Input mux per channel
-  const mux = TEST_MODE ? 0x0001 : DC_MODE ? 0x0002 : 0x0000;
-  for (let ch = 0; ch < 8; ch++) writeReg(0x09 + 5 * ch, mux);
+  const inputMux = TEST_MODE ? 0x0001 : DC_MODE ? 0x0002 : 0x0000;
+  for (let channel = 0; channel < NUM_ADC_CHANNELS; channel++)
+    writeRegister(0x09 + 5 * channel, inputMux);
 
   if (DEBUG) {
-    const names = [
+    const registerNames = [
       "ID",
       "STATUS",
       "MODE",
@@ -251,14 +292,14 @@ async function init() {
       "THR_MSB",
       "THR_LSB",
     ];
-    for (let a = 0; a < names.length; a++)
+    for (let address = 0; address < registerNames.length; address++)
       console.log(
-        `  ${names[a].padEnd(8)} 0x${a.toString(16).padStart(2, "0")} = 0x${readReg(a).toString(16).padStart(4, "0")}`,
+        `  ${registerNames[address].padEnd(8)} 0x${address.toString(16).padStart(2, "0")} = 0x${readRegister(address).toString(16).padStart(4, "0")}`,
       );
-    for (let ch = 0; ch < 8; ch++)
+    for (let channel = 0; channel < NUM_ADC_CHANNELS; channel++)
       console.log(
-        `  CH${ch}_CFG  0x${(0x09 + 5 * ch).toString(16).padStart(2, "0")} = 0x${readReg(
-          0x09 + 5 * ch,
+        `  CH${channel}_CFG  0x${(0x09 + 5 * channel).toString(16).padStart(2, "0")} = 0x${readRegister(
+          0x09 + 5 * channel,
         )
           .toString(16)
           .padStart(4, "0")}`,
@@ -266,7 +307,7 @@ async function init() {
   }
 
   console.log(
-    `ADS131M08 ready, ID=0x${id.toString(16)}` +
+    `ADS131M08 ready, ID=0x${chipId.toString(16)}` +
       (TEST_MODE
         ? "  [TEST MODE: inputs shorted internally, expect ~0 V]"
         : DC_MODE
@@ -275,90 +316,102 @@ async function init() {
   );
 }
 
-function toVolts(code, ch) {
-  return (code * VREF) / (GAINS[ch] * 0x800000);
+// Convert a raw signed ADC reading to the voltage at the ADC input pin
+function adcCodeToVolts(adcCode, channel) {
+  return (adcCode * ADC_REFERENCE_VOLTAGE) / (adcGains[channel] * 0x800000);
 }
 
-let drdyCount = 0;
+let dataReadyCountThisSecond = 0;
 
-// Setting up LEDs
-let bus = null;
+// ---------------------------------------------------------------------------
+// LEDs
+// ---------------------------------------------------------------------------
+
+let i2cBus = null;
 try {
-  bus = i2c.openSync(1);
+  i2cBus = i2c.openSync(1);
 } catch (e) {
   console.warn(`I2C bus 1 unavailable, LEDs off: ${e.message}`);
 }
 
-let lastMask = -1;
-function setLeds(mask) {
-  if (!bus || mask === lastMask) return;
+let lastLedMask = -1;
+function setLeds(ledMask) {
+  if (!i2cBus || ledMask === lastLedMask) return;
   try {
-    bus.writeByteSync(LED_ADDR, LED_CMD_WRITE, mask & 0xff);
-    lastMask = mask;
+    i2cBus.writeByteSync(LED_DRIVER_I2C_ADDRESS, LED_DRIVER_WRITE_COMMAND, ledMask & 0xff);
+    lastLedMask = ledMask;
   } catch (e) {
     console.warn(
-      `LED write failed (is the TPIC2810 at 0x${LED_ADDR.toString(16)}?): ${e.message}`,
+      `LED write failed (is the TPIC2810 at 0x${LED_DRIVER_I2C_ADDRESS.toString(16)}?): ${e.message}`,
     );
   }
 }
 
 async function ledTest() {
-  const names = Object.keys(LED_BIT);
+  const inputNames = Object.keys(LED_BIT_FOR_INPUT);
   console.log("LED test: all on");
   setLeds(0xff);
   await sleep(1500);
-  for (const name of names) {
-    console.log(`  ${name} -> D${LED_BIT[name] + 1}`);
-    setLeds(1 << LED_BIT[name]);
+  for (const inputName of inputNames) {
+    console.log(`  ${inputName} -> D${LED_BIT_FOR_INPUT[inputName] + 1}`);
+    setLeds(1 << LED_BIT_FOR_INPUT[inputName]);
     await sleep(1000);
   }
   setLeds(0);
   console.log("LED test done");
 }
 
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 async function main() {
   if (LED_TEST) {
     await ledTest();
-    bus?.closeSync();
+    i2cBus?.closeSync();
     process.exit(0);
   }
 
-  await init();
+  await initializeAdc();
 
-  drdy.watch((err) => {
+  // Runs every time the ADC has a new sample ready on all 8 channels
+  dataReadyPin.watch((err) => {
     if (err) return console.error(err);
-    const rx = xfer([CMD.NULL]);
-    const status = word16(rx, 0);
-    if (status & 0x0400) console.warn("ADC reset unexpectedly — re-run init()");
-    drdyCount++;
-    if (DEBUG && n % SAMPLES_PER_SECOND === 0) {
-      const hex = [];
-      for (let w = 0; w < NWORDS; w++)
-        hex.push(rx.subarray(w * WORD, w * WORD + WORD).toString("hex"));
+    const frame = spiTransfer([COMMAND.NULL]);
+    const statusWord = readUnsigned16BitWord(frame, 0);
+    if (statusWord & 0x0400) console.warn("ADC reset unexpectedly — re-run initializeAdc()");
+    dataReadyCountThisSecond++;
+    if (DEBUG && totalSampleCount % SAMPLES_PER_SECOND === 0) {
+      const hexWords = [];
+      for (let w = 0; w < WORDS_PER_FRAME; w++)
+        hexWords.push(frame.subarray(w * BYTES_PER_WORD, (w + 1) * BYTES_PER_WORD).toString("hex"));
       console.log(
-        `  raw: status=${hex[0]} ch=[${hex.slice(1, 9).join(" ")}] crc=${hex[9]}`,
+        `  raw: status=${hexWords[0]} ch=[${hexWords.slice(1, 9).join(" ")}] crc=${hexWords[9]}`,
       );
     }
-    const volts = [];
-    for (let ch = 0; ch < 8; ch++) volts.push(toVolts(s24(rx, ch + 1), ch));
-    onSample(volts);
+    // Word 0 is status, words 1-8 are the channels
+    const adcInputVolts = [];
+    for (let channel = 0; channel < NUM_ADC_CHANNELS; channel++)
+      adcInputVolts.push(adcCodeToVolts(readSigned24BitWord(frame, channel + 1), channel));
+    onSample(adcInputVolts);
   });
 
-  watchDeviceConfig((next) => {
-    const gainsChanged = channelGains(next).some((g, i) => g !== GAINS[i]);
+  watchDeviceConfig((newConfig) => {
+    const gainsChanged = channelGains(newConfig).some((gain, i) => gain !== adcGains[i]);
     const needsRestart =
-      next.adc.oversampling_ratio !== cfg.adc.oversampling_ratio ||
-      next.adc.report_seconds !== cfg.adc.report_seconds;
-    cfg = next;
-    deriveSettings(cfg);
+      newConfig.adc.oversampling_ratio !== deviceConfig.adc.oversampling_ratio ||
+      newConfig.adc.report_seconds !== deviceConfig.adc.report_seconds;
+    deviceConfig = newConfig;
+    applySettingsFromConfig(deviceConfig);
     if (gainsChanged) {
       try {
-        writeGains();
+        writeGainsToAdc();
       } catch (e) {
         console.error(`Could not update ADC gains: ${e.message}`);
       }
     }
-    resetBlock();
+    resetReportBlock();
+    resetDbInterval();
     console.log(
       `Settings reloaded from ${CONFIG_PATH}` +
         (gainsChanged ? " (ADC gains updated)" : "") +
@@ -369,130 +422,195 @@ async function main() {
   if (DEBUG)
     setInterval(() => {
       console.log(
-        `  DRDY rate: ${drdyCount} samples/s (expect ~${SAMPLES_PER_SECOND} at OSR ${OSR})`,
+        `  DRDY rate: ${dataReadyCountThisSecond} samples/s (expect ~${SAMPLES_PER_SECOND} at OSR ${OVERSAMPLING_RATIO})`,
       );
-      drdyCount = 0;
+      dataReadyCountThisSecond = 0;
     }, 1000);
 
   process.on("SIGINT", () => {
     setLeds(0);
-    drdy.unexport();
+    dataReadyPin.unexport();
     resetPin.unexport();
-    dev.closeSync();
-    bus?.closeSync();
+    adcSpiDevice.closeSync();
+    i2cBus?.closeSync();
     process.exit();
   });
 }
 
-const COL = 12;
-const header = () => {
-  console.log(CHANNELS.map((c) => c.name.padStart(COL)).join(""));
-  console.log(CHANNELS.map((c) => c.pin.padStart(COL)).join(""));
-  console.log("-".repeat(COL * CHANNELS.length));
+// ---------------------------------------------------------------------------
+// Raw view printing
+// ---------------------------------------------------------------------------
+
+const COLUMN_WIDTH = 12;
+const printRawHeader = () => {
+  console.log(CHANNELS.map((c) => c.name.padStart(COLUMN_WIDTH)).join(""));
+  console.log(CHANNELS.map((c) => c.pin.padStart(COLUMN_WIDTH)).join(""));
+  console.log("-".repeat(COLUMN_WIDTH * CHANNELS.length));
 };
-let n = 0,
-  lines = 0;
+let totalSampleCount = 0;
+let rawLinesPrinted = 0;
 
-const sum = new Float64Array(8);
-const sumSq = new Float64Array(8);
-const sumVI = new Float64Array(12);
-let count = 0;
-let blockStart = process.hrtime.bigint();
+// ---------------------------------------------------------------------------
+// Running sums
+// ---------------------------------------------------------------------------
 
-function resetBlock() {
-  sum.fill(0);
-  sumSq.fill(0);
-  sumVI.fill(0);
-  count = 0;
-  blockStart = process.hrtime.bigint();
+const sumOfValues = new Float64Array(NUM_ADC_CHANNELS); // Σ x        (for the DC offset / mean)
+const sumOfSquares = new Float64Array(NUM_ADC_CHANNELS); // Σ x²       (for RMS)
+const sumOfVoltageTimesCurrent = new Float64Array(NUM_CURRENT_CHANNELS); // Σ v·i (for real power)
+let samplesInBlock = 0;
+let blockStartTime = process.hrtime.bigint();
+
+function resetReportBlock() {
+  sumOfValues.fill(0);
+  sumOfSquares.fill(0);
+  sumOfVoltageTimesCurrent.fill(0);
+  samplesInBlock = 0;
+  blockStartTime = process.hrtime.bigint();
 }
 
-const acc = { n: 0, p: Array(6).fill(0), c: Array(6).fill(0), v: [0, 0] };
-let lastInsert = Date.now();
+// ---------------------------------------------------------------------------
+// Database interval
+// ---------------------------------------------------------------------------
+
+const dbIntervalTotals = {
+  reportCount: 0,
+  rmsCurrent: new Array(NUM_CURRENT_CHANNELS).fill(0), // amps
+  rmsVoltage: new Array(NUM_CURRENT_CHANNELS).fill(0), // volts of the sensor paired with each CT
+  realPower: new Array(NUM_CURRENT_CHANNELS).fill(0), // watts
+  apparentPower: new Array(NUM_CURRENT_CHANNELS).fill(0), // volt-amps
+};
+let lastDbInsertTime = Date.now();
+
+function resetDbInterval() {
+  dbIntervalTotals.reportCount = 0;
+  dbIntervalTotals.rmsCurrent.fill(0);
+  dbIntervalTotals.rmsVoltage.fill(0);
+  dbIntervalTotals.realPower.fill(0);
+  dbIntervalTotals.apparentPower.fill(0);
+}
 
 function saveToDb() {
-  const avg = (a) => a.map((x) => x / acc.n);
-  const clean = (x, floor) => (Math.abs(x) < floor ? 0 : x);
-  const v = avg(acc.v).map((x) => clean(x, V_FLOOR));
-  const c = avg(acc.c).map((x) => clean(x, C_FLOOR));
-  const p = avg(acc.p).map((x, ch) =>
-    c[ch] === 0 || v[CT_VS[ch]] === 0 ? 0 : clean(x, P_FLOOR),
-  );
-  insertPowers(p).catch((e) =>
+  const reportCount = dbIntervalTotals.reportCount;
+  if (reportCount === 0) return;
+  const average = (totals) => totals.map((total) => total / reportCount);
+  const zeroIfBelow = (value, minimum) => (Math.abs(value) < minimum ? 0 : value);
+
+  const currents = average(dbIntervalTotals.rmsCurrent).map((amps) => zeroIfBelow(amps, dbMinCurrent));
+  const voltages = average(dbIntervalTotals.rmsVoltage).map((volts) => zeroIfBelow(volts, dbMinVoltage));
+  const averageRealPowers = average(dbIntervalTotals.realPower);
+  const averageApparentPowers = average(dbIntervalTotals.apparentPower);
+
+  const realPowers = [];
+  const apparentPowers = [];
+  const powerFactors = [];
+  for (let ct = 0; ct < NUM_CURRENT_CHANNELS; ct++) {
+    const hasSignal = currents[ct] !== 0 && voltages[ct] !== 0;
+    const realPower = hasSignal ? zeroIfBelow(averageRealPowers[ct], dbMinPower) : 0;
+    const apparentPower = hasSignal ? averageApparentPowers[ct] : 0;
+    // Power factor from the averaged powers (more accurate than averaging per-block PFs)
+    const powerFactor = apparentPower > 0 ? realPower / apparentPower : 0;
+    realPowers.push(realPower);
+    apparentPowers.push(apparentPower);
+    powerFactors.push(powerFactor);
+  }
+
+  insertRecord(currents, voltages, apparentPowers, realPowers, powerFactors).catch((e) =>
     console.error("DB insert failed:", e.message),
   );
-  acc.n = 0;
-  acc.p.fill(0);
-  acc.c.fill(0);
-  acc.v.fill(0);
+  resetDbInterval();
 }
 
-function onSample(v) {
-  n++;
+// ---------------------------------------------------------------------------
+// Per-sample processing
+// ---------------------------------------------------------------------------
+
+// Called once per ADC sample with the voltage at each of the 8 ADC input pins
+function onSample(adcInputVolts) {
+  totalSampleCount++;
   if (RAW_VIEW) {
-    if (n % SAMPLES_PER_SECOND !== 0) return;
-    if (lines++ % 20 === 0) header();
-    console.log(v.map((x) => (x.toFixed(5) + " V").padStart(COL)).join(""));
+    if (totalSampleCount % SAMPLES_PER_SECOND !== 0) return;
+    if (rawLinesPrinted++ % 20 === 0) printRawHeader();
+    console.log(adcInputVolts.map((volts) => (volts.toFixed(5) + " V").padStart(COLUMN_WIDTH)).join(""));
     return;
   }
 
-  // Scale to real units
-  const i = [];
-  const vs = [v[6] * SCALE[6], v[7] * SCALE[7]];
-  for (let ch = 0; ch < 6; ch++) i.push(v[ch] * SCALE[ch]);
-  const x = [...i, ...vs];
-  for (let k = 0; k < 8; k++) {
-    sum[k] += x[k];
-    sumSq[k] += x[k] * x[k];
+  const scaledValues = adcInputVolts.map((volts, channel) => volts * channelScaleFactors[channel]);
+  const instantCurrents = scaledValues.slice(0, NUM_CURRENT_CHANNELS);
+  const instantLineVoltages = scaledValues.slice(FIRST_VOLTAGE_CHANNEL);
+
+  for (let channel = 0; channel < NUM_ADC_CHANNELS; channel++) {
+    sumOfValues[channel] += scaledValues[channel];
+    sumOfSquares[channel] += scaledValues[channel] * scaledValues[channel];
   }
-  for (let ch = 0; ch < 6; ch++) sumVI[ch] += vs[CT_VS[ch]] * i[ch];
-  if (++count < BLOCK) return;
+  for (let ct = 0; ct < NUM_CURRENT_CHANNELS; ct++) {
+    const pairedVoltage = instantLineVoltages[voltageSensorForCurrentChannel[ct]];
+    sumOfVoltageTimesCurrent[ct] += pairedVoltage * instantCurrents[ct];
+  }
 
+  if (++samplesInBlock < SAMPLES_PER_REPORT) return;
+  finishReportBlock();
+}
+
+function finishReportBlock() {
   const now = process.hrtime.bigint();
-  const secs = Number(now - blockStart) / 1e9;
-  const missed = Math.max(0, Math.round(secs * NOMINAL_SPS) - count);
-  const mean = (k) => sum[k] / count;
-  const rms = (k) => Math.sqrt(Math.max(0, sumSq[k] / count - mean(k) ** 2));
+  const blockSeconds = Number(now - blockStartTime) / 1e9;
+  const missedSamples = Math.max(0, Math.round(blockSeconds * NOMINAL_SAMPLES_PER_SECOND) - samplesInBlock);
 
-  const vRms = [rms(6), rms(7)];
-  acc.v[0] += vRms[0];
-  acc.v[1] += vRms[1];
+  const blockMean = (channel) => sumOfValues[channel] / samplesInBlock;
+  // RMS with the DC offset removed (AC RMS)
+  const blockRms = (channel) =>
+    Math.sqrt(Math.max(0, sumOfSquares[channel] / samplesInBlock - blockMean(channel) ** 2));
+
+  const sensorRmsVoltages = [];
+  for (let sensor = 0; sensor < NUM_VOLTAGE_SENSORS; sensor++)
+    sensorRmsVoltages.push(blockRms(FIRST_VOLTAGE_CHANNEL + sensor));
+
   console.log(
-    `\nVS1 ${vRms[0].toFixed(1)} V   VS2 ${vRms[1].toFixed(1)} V   ` +
-      `(${count} samples, ~${missed} missed)`,
+    `\nVS1 ${sensorRmsVoltages[0].toFixed(1)} V   VS2 ${sensorRmsVoltages[1].toFixed(1)} V   ` +
+      `(${samplesInBlock} samples, ~${missedSamples} missed)`,
   );
   console.log("       Irms (A)    P (W)    S (VA)     PF");
-  let mask = 0;
-  if (vRms[0] > V_ON) mask |= 1 << LED_BIT.VS1;
-  if (vRms[1] > V_ON) mask |= 1 << LED_BIT.VS2;
-  for (let ch = 0; ch < 6; ch++) {
-    const vk = 6 + CT_VS[ch];
-    const iRms = rms(ch);
-    if (iRms > I_ON) mask |= 1 << LED_BIT[`CT${ch + 1}`];
-    const p = sumVI[ch] / count - mean(vk) * mean(ch);
-    const sVA = vRms[CT_VS[ch]] * iRms;
-    const pf = sVA > 1 ? p / sVA : 0;
-    acc.p[ch] += p;
-    acc.c[ch] += iRms;
+
+  let ledMask = 0;
+  if (sensorRmsVoltages[0] > ledMinVoltage) ledMask |= 1 << LED_BIT_FOR_INPUT.VS1;
+  if (sensorRmsVoltages[1] > ledMinVoltage) ledMask |= 1 << LED_BIT_FOR_INPUT.VS2;
+
+  for (let ct = 0; ct < NUM_CURRENT_CHANNELS; ct++) {
+    const sensorIndex = voltageSensorForCurrentChannel[ct];
+    const voltageChannel = FIRST_VOLTAGE_CHANNEL + sensorIndex;
+    const rmsVoltage = sensorRmsVoltages[sensorIndex];
+    const rmsCurrent = blockRms(ct);
+    if (rmsCurrent > ledMinCurrent) ledMask |= 1 << LED_BIT_FOR_INPUT[`CT${ct + 1}`];
+
+    // Real power = mean(v·i) with DC offsets removed
+    const realPower = sumOfVoltageTimesCurrent[ct] / samplesInBlock - blockMean(voltageChannel) * blockMean(ct);
+    const apparentPower = rmsVoltage * rmsCurrent;
+    const powerFactor = apparentPower > 1 ? realPower / apparentPower : 0;
+
+    dbIntervalTotals.rmsCurrent[ct] += rmsCurrent;
+    dbIntervalTotals.rmsVoltage[ct] += rmsVoltage;
+    dbIntervalTotals.realPower[ct] += realPower;
+    dbIntervalTotals.apparentPower[ct] += apparentPower;
+
     console.log(
-      `  CT${ch + 1}  ${iRms.toFixed(3).padStart(8)} ${p.toFixed(1).padStart(8)} ` +
-        `${sVA.toFixed(1).padStart(9)} ${pf.toFixed(3).padStart(6)}`,
+      `  CT${ct + 1}  ${rmsCurrent.toFixed(3).padStart(8)} ${realPower.toFixed(1).padStart(8)} ` +
+        `${apparentPower.toFixed(1).padStart(9)} ${powerFactor.toFixed(3).padStart(6)}`,
     );
   }
 
-  setLeds(mask);
+  setLeds(ledMask);
 
-  acc.n++;
-  if (Date.now() - lastInsert >= INSERT_SECONDS * 1000) {         
-    lastInsert = Date.now();
+  dbIntervalTotals.reportCount++;
+  if (Date.now() - lastDbInsertTime >= dbInsertIntervalSeconds * 1000) {
+    lastDbInsertTime = Date.now();
     saveToDb();
   }
 
-  sum.fill(0);
-  sumSq.fill(0);
-  sumVI.fill(0);
-  count = 0;
-  blockStart = now;
+  sumOfValues.fill(0);
+  sumOfSquares.fill(0);
+  sumOfVoltageTimesCurrent.fill(0);
+  samplesInBlock = 0;
+  blockStartTime = now;
 }
 
 main().catch((e) => {
