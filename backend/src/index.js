@@ -5,6 +5,7 @@ import passport from 'passport';
 import { config } from './config.js';
 import { setupPassport } from './auth/passport.js';
 import authRoutes from './auth/routes.js';
+import deviceConfigRoutes from './deviceConfigRoutes.js';
 import { Server } from 'socket.io';
 import { initializeSocketHandlers } from './socket/handler.js';
 
@@ -32,7 +33,7 @@ app.get('/', (_req, res) => {
   res.json({
     service: 'energy-monitor',
     message: 'This is the API. Open the Vue app at http://localhost:5173',
-    endpoints: ['/api/health', '/api/auth/login'],
+    endpoints: ['/api/health', '/api/auth/login', '/api/device-config'],
   });
 });
 
@@ -41,6 +42,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/device-config', deviceConfigRoutes);
 
 
 server.listen(config.port, () => {
