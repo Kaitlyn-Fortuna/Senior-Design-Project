@@ -94,3 +94,15 @@ VS1 121.3 V   VS2 120.8 V   (4000 samples, ~0 missed)
 - **Irms**: RMS current through the clamp.
 - **P**: real power. **S**: apparent power. **PF**: power factor (P / S).
 - **~N missed**: samples dropped during that interval. Should stay at or near 0.
+
+## Database
+
+### Connected to PostgreSQL database
+```bash
+psql --user postgres
+```
+
+### Insert test data into the table
+```sql
+INSERT INTO powerdata(i0,i1,i2,i3,i4,i5,v0,v1,v2,v3,v4,v5,p0,p1,p2,p3,p4,p5,s0,s1,s2,s3,s4,s5,pf0,pf1,pf2,pf3,pf4,pf5,powerprice) VALUES (3,4,5,6,7,8,120,120,120,120,120,120,300,400,500,600,700,800,360,480,600,720,840,960,1,1,1,1,1,1,11.1);
+```
