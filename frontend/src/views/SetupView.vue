@@ -30,6 +30,7 @@ import {
 import {
   ActivityIcon,
   AlertCircleIcon,
+  AlertTriangleIcon,
   ArrowLeftIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -55,6 +56,7 @@ const config = ref(null); // mirrors device-configuration.json
 const options = ref({ gains: [], oversamplingRatios: [] });
 const isLoading = ref(true);
 const loadError = ref("");
+const loadedAdc = ref(null);
 
 async function load() {
   isLoading.value = true;
@@ -65,6 +67,7 @@ async function load() {
       config.value = data.config;
     });
     options.value = data.options;
+    loadedAdc.value = { ...data.config.adc };
     lastSaved.value = data.config.last_updated || null;
     cachePortNames(data.config);
   } catch (err) {
@@ -257,6 +260,15 @@ const systemErrorCount = computed(
 watch(systemErrorCount, (n) => {
   if (n > 0) systemSettingsOpen.value = true;
 });
+
+const adcChanged = computed(
+  () =>
+    !!loadedAdc.value &&
+    !!config.value &&
+    (config.value.adc.oversampling_ratio !==
+      loadedAdc.value.oversampling_ratio ||
+      config.value.adc.report_seconds !== loadedAdc.value.report_seconds),
+);
 
 const enabledCount = (keys) =>
   keys.filter((k) => config.value?.inputs[k].enabled).length;
@@ -461,8 +473,8 @@ const errorCount = computed(() => Object.keys(fieldErrors.value).length);
               <section class="flex flex-col gap-3">
                 <div>
                   <h2 class="text-sm font-semibold m-0">ADC Sampling</h2>
-                  <p class="text-xs text-muted-foreground m-0 mt-0.5">
-                    Takes effect after the meter program restarts.
+                  <p class="text-xs text-destructive m-0 mt-0.5">
+                      Requires restart and can break hardware. Change sparingly.
                   </p>
                 </div>
                 <ConfigSelectField
@@ -482,6 +494,18 @@ const errorCount = computed(() => Object.keys(fieldErrors.value).length);
                   :max="60"
                   :error="err('adc report_seconds')"
                 />
+                <div
+                  v-if="adcChanged"
+                  role="alert"
+                  class="flex items-start gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-xs"
+                >
+                  <RefreshCwIcon class="size-4 mt-px shrink-0 text-destructive" />
+                  <span>
+                    <strong class="font-semibold">Restart required.</strong>
+                    The meter keeps the old sampling settings until it is
+                    restarted.
+                  </span>
+                </div>
               </section>
 
               <!-- Database -->

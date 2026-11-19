@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from "vue";
 import {
   Select,
   SelectContent,
@@ -29,6 +30,12 @@ const props = defineProps({
 
 const emit = defineEmits(["update:modelValue"]);
 
+const selectedLabel = computed(
+  () =>
+    props.options.find((o) => String(o.value) === String(props.modelValue))
+      ?.label ?? "",
+);
+
 function onChange(value) {
   const match = props.options.find((o) => String(o.value) === value);
   emit("update:modelValue", match ? match.value : value);
@@ -48,7 +55,7 @@ function onChange(value) {
         class="w-full"
         :aria-invalid="!!props.error"
       >
-        <SelectValue />
+        <SelectValue>{{ selectedLabel }}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem

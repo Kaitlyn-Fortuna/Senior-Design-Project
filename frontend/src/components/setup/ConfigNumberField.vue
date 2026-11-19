@@ -49,7 +49,7 @@ function onInput(value) {
       :max="props.max"
       :disabled="props.disabled"
       :aria-invalid="!!props.error"
-      class="font-mono"
+      class="font-mono [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       @update:model-value="onInput"
     />
     <FieldError v-if="props.error" class="text-xs">{{

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +17,7 @@ import ConfigNumberField from "./ConfigNumberField.vue";
 import ConfigSelectField from "./ConfigSelectField.vue";
 
 /**
- * Edits the advanced (non-name, non-enabled) values of one group of inputs
+ * Edits the enabled state and advanced (non-name) values of one group of inputs
  * (all current inputs or all voltage inputs). Edits are kept as drafts until
  * Save is pressed; switching between inputs keeps every input's draft.
  */
@@ -35,6 +36,7 @@ const emit = defineEmits(["update:open", "save"]);
 
 const FIELDS = {
   current: [
+    "enabled",
     "ct_ratio",
     "ct_burden_ohms",
     "turns",
@@ -43,6 +45,7 @@ const FIELDS = {
     "calibration",
   ],
   voltage: [
+    "enabled",
     "transformer_input_v",
     "transformer_output_v",
     "divider_ratio",
@@ -99,6 +102,7 @@ function validate(draft) {
   const errors = {};
   for (const f of fields.value) {
     const value = draft[f];
+    if (f === "enabled") continue;
     if (f === "gain") {
       if (!props.validGains.includes(value)) errors[f] = "Choose a gain";
       continue;
@@ -144,12 +148,6 @@ const scale = computed(() => {
         i.calibration;
   return Number.isFinite(v) && v > 0 ? v : NaN;
 });
-
-const scaleSummary = computed(() =>
-  Number.isNaN(scale.value)
-    ? ""
-    : `${scale.value.toFixed(2)} ${unit.value} per ADC volt`,
-);
 
 // ADC full scale is ±1.2 V / gain; divide by √2 for the largest RMS sine wave
 const ADC_VREF = 1.2;
@@ -208,8 +206,8 @@ const typeLabel = computed(() =>
     >
       <DialogHeader>
         <DialogTitle>Advanced Settings · {{ typeLabel }}</DialogTitle>
-        <DialogDescription>
-          Changes apply to device-configuration.json when you press Save.
+        <DialogDescription class="sr-only">
+          Edit the {{ typeLabel.toLowerCase() }} one at a time.
         </DialogDescription>
       </DialogHeader>
 
@@ -231,7 +229,7 @@ const typeLabel = computed(() =>
               k === activeKey
                 ? 'border-primary bg-primary/10 text-foreground'
                 : 'border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted',
-              !props.inputs[k].enabled && k !== activeKey && 'opacity-60',
+              !drafts[k]?.enabled && k !== activeKey && 'opacity-60',
             )
           "
           @click="activeKey = k"
@@ -262,13 +260,14 @@ const typeLabel = computed(() =>
           <span class="text-sm font-medium truncate">{{
             props.displayName(activeKey)
           }}</span>
-          <Badge
-            v-if="!props.inputs[activeKey].enabled"
-            variant="secondary"
-            class="text-xs"
+          <label
+            :for="fieldId('enabled')"
+            class="ml-auto flex items-center gap-2 text-xs font-medium cursor-pointer select-none"
+            :class="active.enabled ? 'text-foreground' : 'text-muted-foreground'"
           >
-            Disabled
-          </Badge>
+            {{ active.enabled ? "Enabled" : "Disabled" }}
+            <Switch :id="fieldId('enabled')" v-model="active.enabled" />
+          </label>
         </div>
 
         <!-- Current transformer settings -->
@@ -378,10 +377,6 @@ const typeLabel = computed(() =>
           />
         </div>
 
-        <p v-if="scaleSummary" class="text-xs text-muted-foreground m-0">
-          Effective scale:
-          <span class="font-mono text-foreground">{{ scaleSummary }}</span>
-        </p>
       </div>
 
       <!-- Unsaved-changes warning -->
