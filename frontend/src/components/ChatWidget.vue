@@ -1,5 +1,6 @@
 <script setup>
-import { nextTick, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
+import { useRoute } from "vue-router";
 import { MessageCircleIcon, SendIcon, XIcon } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +13,30 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { sendChatMessage } from "@/services/chatbot";
+import { getChatContext } from "@/services/chatContext";
+import { Badge } from "@/components/ui/badge";
+
+// Which page the assistant is helping with, and starter questions for it
+const PAGES = {
+  "/": {
+    key: "dashboard",
+    label: "Dashboard",
+    suggestions: ["What is using the most power?", "How much has this cost me?", "How can I save energy?"],
+  },
+  "/details": {
+    key: "details",
+    label: "Details",
+    suggestions: ["Summarise this date range", "When was usage highest?", "Compare my devices"],
+  },
+  "/setup": {
+    key: "setup",
+    label: "Setup",
+    suggestions: ["How do I set up a current clamp?", "What should my price be?", "Why is my power negative?"],
+  },
+};
+
+const route = useRoute();
+const currentPage = computed(() => PAGES[route.path] ?? PAGES["/"]);
 
 const isOpen = ref(false);
 const messages = ref([]);
@@ -27,6 +52,11 @@ async function scrollToBottom() {
   }
 }
 
+function ask(question) {
+  draft.value = question;
+  onSubmit();
+}
+
 async function onSubmit() {
   const text = draft.value.trim();
   if (!text || isLoading.value) return;
@@ -38,7 +68,11 @@ async function onSubmit() {
   scrollToBottom();
 
   try {
-    const reply = await sendChatMessage(messages.value);
+    const page = currentPage.value.key;
+    const reply = await sendChatMessage(messages.value, {
+      page,
+      context: getChatContext(page),
+    });
     messages.value.push({ role: "assistant", content: reply });
   } catch (err) {
     messages.value.pop();
@@ -55,7 +89,10 @@ async function onSubmit() {
   <div class="fixed right-4 bottom-4 z-50">
     <Card v-if="isOpen" class="flex h-[28rem] w-80 flex-col sm:w-96">
       <CardHeader>
-        <CardTitle>Energy Assistant</CardTitle>
+        <CardTitle class="flex items-center gap-2">
+          Energy Assistant
+          <Badge variant="secondary" class="font-normal">{{ currentPage.label }}</Badge>
+        </CardTitle>
         <CardAction>
           <Button
             variant="ghost"
@@ -74,9 +111,20 @@ async function onSubmit() {
           class="flex h-full flex-col gap-2 overflow-y-auto"
           aria-live="polite"
         >
-          <p v-if="messages.length === 0" class="text-muted-foreground text-sm">
-            Ask me about your energy usage.
-          </p>
+          <div v-if="messages.length === 0" class="flex flex-col gap-2">
+            <p class="text-muted-foreground text-sm m-0">
+              I can see a summary of the {{ currentPage.label.toLowerCase() }} page. Try:
+            </p>
+            <button
+              v-for="q in currentPage.suggestions"
+              :key="q"
+              type="button"
+              class="self-start rounded-lg border border-border px-3 py-1.5 text-left text-sm hover:bg-muted cursor-pointer"
+              @click="ask(q)"
+            >
+              {{ q }}
+            </button>
+          </div>
 
           <div
             v-for="(message, index) in messages"
