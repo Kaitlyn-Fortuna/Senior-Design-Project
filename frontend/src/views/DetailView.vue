@@ -15,6 +15,9 @@ import {
 } from "@/lib/format";
 import TimeSeriesChart from "@/components/charts/TimeSeriesChart.vue";
 import EnergySelectionCard from "@/components/charts/EnergySelectionCard.vue";
+import SummarizeButton from "@/components/summary/SummarizeButton.vue";
+import SummaryPanel from "@/components/summary/SummaryPanel.vue";
+import { powerProfile, useAiSummary } from "@/composables/useAiSummary";
 import { Switch } from "@/components/ui/switch";
 
 import { Button } from "@/components/ui/button";
@@ -394,6 +397,21 @@ function chatSummary() {
 }
 
 onMounted(() => setChatContext("details", chatSummary));
+
+// ---- Inline "Summarize" for the chosen range ----
+const rangeSummary = useAiSummary("details-range", () => {
+  const { chartSelection, ...rest } = chatSummary();
+  return {
+    ...rest,
+    profileWatts: powerProfile(timeSeriesData.value, activeDevices.value.map((d) => d.key), {
+      max: 48,
+      labelFor: (k) => devices.value.find((d) => d.key === k)?.label ?? k,
+    }),
+  };
+});
+
+// A different range or set of devices makes the old summary wrong
+watch([customStartDate, customEndDate, selectedDeviceKeys, showDisabled], () => rangeSummary.dismiss());
 onUnmounted(() => clearChatContext("details", chatSummary));
 </script>
 
@@ -736,6 +754,12 @@ onUnmounted(() => clearChatContext("details", chatSummary));
             <Badge variant="secondary" class="font-mono">
               {{ timeSeriesData.length }} data points
             </Badge>
+            <SummarizeButton
+              v-if="!isLoading && activeDevices.length && timeSeriesData.length"
+              label="Summarize range"
+              :loading="rangeSummary.loading.value"
+              @click="rangeSummary.generate()"
+            />
           </div>
         </CardHeader>
         <CardContent class="flex flex-col gap-4">
@@ -812,9 +836,12 @@ onUnmounted(() => clearChatContext("details", chatSummary));
               class="w-full h-80 min-h-[300px]"
             />
 
+            <SummaryPanel :summary="rangeSummary" :title="`${activeRangeLabel} · ${activeDevices.length} devices`" />
+
             <EnergySelectionCard
               v-if="selection"
               :selection="selection"
+              :points="timeSeriesData"
               :devices="activeDevices"
               @clear="selection = null"
               @result="selectionResult = $event"

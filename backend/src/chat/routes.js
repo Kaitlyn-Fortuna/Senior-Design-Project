@@ -7,10 +7,13 @@ const router = Router();
 
 // Largest view summary accepted from the browser (characters of JSON)
 const MAX_CONTEXT_CHARS = 8000;
+// Largest data block accepted for an inline "Summarize" request
+const MAX_SUMMARY_DATA_CHARS = 16000;
 
 const BASE_PROMPT = `You are the Energy Assistant inside a home smart power meter web app.
 The meter has up to six current clamps (inputs C0-C5, one per circuit or appliance) and two voltage sensors (V0, V1, one per leg of split-phase power). Each clamp is paired with one voltage sensor to calculate real power (W), apparent power (VA) and power factor. Readings are saved to a database every few seconds.
-Be helpful, concise and accurate. Use the "current view summary" below as the source of truth for the user's numbers; it describes what is on their screen right now. Don't invent readings that aren't in it. If the summary doesn't contain what they ask, say so and tell them where in the app to find it. Use plain language and short answers (a few sentences or a short list). Format money as dollars and energy in kWh.`;
+Be helpful, concise and accurate. Use the "current view summary" below as the source of truth for the user's numbers; it describes what is on their screen right now. Don't invent readings that aren't in it. If the summary doesn't contain what they ask, say so and tell them where in the app to find it. Use plain language and short answers (a few sentences or a short list). Format money as dollars and energy in kWh.
+Your reply is rendered as Markdown: use **bold** for key numbers and short bullet lists where they help. Avoid headings and long tables.`;
 
 const PAGE_PROMPTS = {
   dashboard: `The user is on the DASHBOARD (main page). It shows:
@@ -32,13 +35,39 @@ Help the user analyse the selected range: compare devices, spot peaks and unusua
 Common problems: negative power -> clamp on backwards or wrong voltage leg; power factor far from 1 on a resistive load -> wrong leg; readings of 0 -> input disabled or below the minimums.`,
 };
 
+// What each inline "Summarize" button covers
+const SUMMARY_SECTIONS = {
+  "dashboard-48h": "the last 48 hours of power usage on the dashboard (total energy and cost, per-device share, peak, and an hourly profile of total power)",
+  selection: "a time range the user selected on a power chart (energy, cost and average power, total and per device, plus the power profile inside the range)",
+  "details-range": "the date range and devices the user picked on the Details page (totals, per-device energy, cost and peaks, and a power profile over the range)",
+};
+
+const SUMMARY_PROMPT = `You write short inline summaries inside a home smart power meter web app. The summary appears directly under a chart, so the user can see the chart too.
+Rules:
+- 2 to 4 bullet points, under 90 words in total. No headings, no intro sentence, no sign-off.
+- Lead with the key takeaway (total energy and cost, or the biggest consumer).
+- Point out patterns in the profile: when usage peaked, quiet periods, anything unusual (e.g. a device drawing power all night, a sudden spike).
+- If there's a clear, practical way to save money, add it as the last bullet. Otherwise skip it.
+- Use **bold** for the most important numbers. Money in dollars, energy in kWh, power in W or kW.
+- Only use numbers that are in the data. If the data is empty or all zero, say so in one bullet.`;
+
+function stringifyLimited(value, limit) {
+  const text = JSON.stringify(value);
+  return text.length > limit ? `${text.slice(0, limit)}... (truncated)` : text;
+}
+
+function getClient() {
+  return new OpenAI({ apiKey: config.openai.apiKey });
+}
+
+function isConfigured() {
+  return Boolean(config.openai.apiKey && config.openai.model);
+}
+
 function buildSystemPrompt(page, context) {
   const parts = [BASE_PROMPT, PAGE_PROMPTS[page] ?? PAGE_PROMPTS.dashboard];
   if (context && typeof context === "object") {
-    let summary = JSON.stringify(context);
-    if (summary.length > MAX_CONTEXT_CHARS) {
-      summary = `${summary.slice(0, MAX_CONTEXT_CHARS)}... (truncated)`;
-    }
+    const summary = stringifyLimited(context, MAX_CONTEXT_CHARS);
     parts.push(`Current view summary (JSON, generated ${new Date().toISOString()}):\n${summary}`);
   } else {
     parts.push("No view summary is available yet (data may still be loading).");
@@ -50,7 +79,7 @@ router.post(
   "/",
   passport.authenticate("jwt", { session: false }),
   async (req, res) => {
-    if (!config.openai.apiKey || !config.openai.model) {
+    if (!isConfigured()) {
       return res
         .status(503)
         .json({ error: "Assistant isn't configured properly" });
@@ -69,15 +98,50 @@ router.post(
     const pageKey = typeof page === "string" && PAGE_PROMPTS[page] ? page : "dashboard";
 
     try {
-      const client = new OpenAI({ apiKey: config.openai.apiKey });
-      const completion = await client.chat.completions.create({
+      const completion = await getClient().chat.completions.create({
         model: config.openai.model,
         messages: [{ role: "system", content: buildSystemPrompt(pageKey, context) }, ...history],
       });
-    return res.json({ reply: completion.choices[0].message.content });
+      return res.json({ reply: completion.choices[0].message.content });
     } catch (error) {
       console.error("Error generating response:", error.message);
       return res.status(502).json({ error: "Failed to generate response" });
+    }
+  },
+);
+
+// Short inline summary of one section of a page (shown under the chart, not in the chat)
+router.post(
+  "/summarize",
+  passport.authenticate("jwt", { session: false }),
+  async (req, res) => {
+    if (!isConfigured()) {
+      return res.status(503).json({ error: "Assistant isn't configured properly" });
+    }
+
+    const { section, data } = req.body;
+    if (typeof section !== "string" || !SUMMARY_SECTIONS[section]) {
+      return res.status(400).json({ error: "Unknown section" });
+    }
+    if (!data || typeof data !== "object") {
+      return res.status(400).json({ error: "Missing data" });
+    }
+
+    try {
+      const completion = await getClient().chat.completions.create({
+        model: config.openai.model,
+        messages: [
+          { role: "system", content: SUMMARY_PROMPT },
+          {
+            role: "user",
+            content: `Summarize ${SUMMARY_SECTIONS[section]}.\nGenerated ${new Date().toISOString()}. Data (JSON):\n${stringifyLimited(data, MAX_SUMMARY_DATA_CHARS)}`,
+          },
+        ],
+      });
+      return res.json({ summary: completion.choices[0].message.content });
+    } catch (error) {
+      console.error("Error generating summary:", error.message);
+      return res.status(502).json({ error: "Failed to generate summary" });
     }
   },
 );

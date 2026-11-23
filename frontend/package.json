@@ -17,6 +17,8 @@
     "chart.js": "^4.4.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dompurify": "^3.5.0",
+    "marked": "^15.0.12",
     "reka-ui": "^2.11.0",
     "shadcn-vue": "^2.9.0",
     "socket.io-client": "^4.8.1",

@@ -26,6 +26,9 @@ import Sparkline from "@/components/live/Sparkline.vue";
 import AnimatedNumber from "@/components/live/AnimatedNumber.vue";
 import TimeSeriesChart from "@/components/charts/TimeSeriesChart.vue";
 import EnergySelectionCard from "@/components/charts/EnergySelectionCard.vue";
+import SummarizeButton from "@/components/summary/SummarizeButton.vue";
+import SummaryPanel from "@/components/summary/SummaryPanel.vue";
+import { powerProfile, useAiSummary } from "@/composables/useAiSummary";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
@@ -39,6 +42,7 @@ import {
 } from "@lucide/vue";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardFooter,
@@ -329,6 +333,29 @@ function chatSummary() {
 }
 
 onMounted(() => setChatContext("dashboard", chatSummary));
+
+// ---- Inline "Summarize" for the 48-hour charts ----
+const historySummary = useAiSummary("dashboard-48h", () => {
+  const { last48Hours, lastHourCost, live, pricePerKwh } = chatSummary();
+  const points = series.value.points.map((p) => {
+    const point = { t: Date.parse(p.timestamp), total: 0 };
+    for (const d of devices.value) {
+      point[d.key] = p.ports[d.port];
+      point.total += p.ports[d.port];
+    }
+    return point;
+  });
+  return {
+    pricePerKwh,
+    last48Hours,
+    lastHourCost,
+    liveNow: live.totalW !== undefined ? { totalW: live.totalW, costPerHour: live.costPerHour } : live,
+    profileWatts: powerProfile(points, devices.value.map((d) => d.key), {
+      max: 48,
+      labelFor: (k) => devices.value.find((d) => d.key === k)?.label ?? k,
+    }),
+  };
+});
 onUnmounted(() => clearChatContext("dashboard", chatSummary));
 </script>
 
@@ -467,6 +494,9 @@ onUnmounted(() => clearChatContext("dashboard", chatSummary));
         <CardHeader>
           <CardTitle>Power Usage (48 hours)</CardTitle>
           <CardDescription>{{ historyDescription }}</CardDescription>
+          <CardAction v-if="historyChartData.length">
+            <SummarizeButton :loading="historySummary.loading.value" @click="historySummary.generate()" />
+          </CardAction>
         </CardHeader>
         <CardContent class="flex-1 flex flex-col gap-3">
           <div v-if="seriesLoading" class="h-[260px] flex items-center justify-center">
@@ -488,9 +518,11 @@ onUnmounted(() => clearChatContext("dashboard", chatSummary));
               selectable
               class="h-[260px]"
             />
+            <SummaryPanel :summary="historySummary" title="Last 48 hours" />
             <EnergySelectionCard
               v-if="selection"
               :selection="selection"
+              :points="historyChartData"
               :devices="devices"
               @clear="selection = null"
               @result="selectionResult = $event"

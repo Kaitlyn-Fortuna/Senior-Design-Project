@@ -4,6 +4,9 @@ import { XIcon } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { fetchEnergy } from "@/services/power";
+import SummarizeButton from "@/components/summary/SummarizeButton.vue";
+import SummaryPanel from "@/components/summary/SummaryPanel.vue";
+import { powerProfile, useAiSummary } from "@/composables/useAiSummary";
 import {
   formatDuration,
   formatEnergy,
@@ -19,6 +22,8 @@ import {
 const props = defineProps({
   selection: { type: Object, required: true }, // { start, end } ms
   devices: { type: Array, required: true }, // [{ port, label, color }]
+  // Chart points ({ t, total, [device key]: W }) used to describe the shape of the range
+  points: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["clear", "result"]);
 
@@ -45,6 +50,36 @@ async function load() {
 }
 
 watch(() => [props.selection.start, props.selection.end], load, { immediate: true });
+
+const summary = useAiSummary("selection", () => {
+  const inRange = props.points.filter((p) => p.t >= props.selection.start && p.t <= props.selection.end);
+  const keys = props.devices.map((d) => d.key).filter((k) => inRange[0]?.[k] !== undefined);
+  return {
+    range: {
+      start: new Date(props.selection.start).toLocaleString(),
+      end: new Date(props.selection.end).toLocaleString(),
+      duration: formatDuration((props.selection.end - props.selection.start) / 1000),
+    },
+    readings: result.value?.count ?? 0,
+    totalKWh: +totals.value.kWh.toFixed(4),
+    totalCost: +totals.value.cost.toFixed(4),
+    averageW: +totals.value.avgW.toFixed(1),
+    byDevice: rows.value.map((r) => ({
+      name: r.label,
+      kWh: +r.kWh.toFixed(4),
+      cost: +r.cost.toFixed(4),
+      averageW: +Number(r.avgW || 0).toFixed(1),
+      percentOfEnergy: totals.value.kWh > 0 ? Math.round((r.kWh / totals.value.kWh) * 100) : 0,
+    })),
+    profileWatts: powerProfile(inRange, keys, {
+      max: 40,
+      labelFor: (k) => props.devices.find((d) => d.key === k)?.label ?? k,
+    }),
+  };
+});
+
+// A new range makes the old summary wrong
+watch(() => [props.selection.start, props.selection.end], () => summary.dismiss());
 
 const rows = computed(() => {
   const r = result.value;
@@ -102,9 +137,16 @@ watch(
           </span>
         </p>
       </div>
-      <Button variant="ghost" size="icon-sm" aria-label="Clear selection" @click="emit('clear')">
-        <XIcon />
-      </Button>
+      <div class="flex items-center gap-1 shrink-0">
+        <SummarizeButton
+          v-if="result && result.count > 0"
+          :loading="summary.loading.value"
+          @click="summary.generate()"
+        />
+        <Button variant="ghost" size="icon-sm" aria-label="Clear selection" @click="emit('clear')">
+          <XIcon />
+        </Button>
+      </div>
     </div>
 
     <div v-if="loading && !result" class="flex items-center gap-2 text-sm text-muted-foreground">
@@ -151,6 +193,8 @@ watch(
             <span class="font-mono text-muted-foreground tabular-nums text-right w-16">{{ formatMoney(r.cost) }}</span>
           </li>
         </ul>
+
+        <SummaryPanel :summary="summary" title="Selected range" />
       </template>
     </template>
   </div>

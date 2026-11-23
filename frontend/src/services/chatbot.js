@@ -22,3 +22,25 @@ export async function sendChatMessage(message, { page, context } = {}) {
     }
     return data.reply;
 }
+
+/**
+ * Short inline summary of one section of a page.
+ * @param {string} section  which summary (see SUMMARY_SECTIONS in the backend)
+ * @param {object} data     compact numbers for that section
+ */
+export async function requestSummary(section, data) {
+    const response = await fetch(`${API_URL}/api/chat/summarize`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${getToken()}`,
+        },
+        body: JSON.stringify({ section, data }),
+    });
+
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(body.error || 'Failed to summarize');
+    }
+    return body.summary;
+}
