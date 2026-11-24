@@ -47,11 +47,27 @@ const failedText = ref("");
 const messageList = ref(null);
 const textarea = ref(null);
 
+let activeRequest = null; // AbortController for the reply being streamed
+
 async function scrollToBottom() {
   await nextTick();
   const el = messageList.value;
   if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
 }
+
+// Keep the growing reply in view, unless the user has scrolled up to read something
+async function followStream() {
+  const el = messageList.value;
+  if (!el) return;
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  await nextTick();
+  if (nearBottom) el.scrollTop = el.scrollHeight;
+}
+
+// Typing dots show until the first piece of the reply arrives
+const isWaitingForReply = computed(
+  () => isLoading.value && messages.value.at(-1)?.content === "",
+);
 
 function resizeTextarea() {
   const el = textarea.value;
@@ -73,6 +89,9 @@ function close() {
 }
 
 function newChat() {
+  activeRequest?.abort();
+  activeRequest = null;
+  isLoading.value = false;
   messages.value = [];
   error.value = "";
   failedText.value = "";
@@ -103,26 +122,44 @@ async function onSubmit() {
 
   const page = currentPage.value.key;
   messages.value.push({ role: "user", content: text, page });
+  const history = messages.value.map(({ role, content }) => ({ role, content }));
+  // Empty assistant message that fills in as the reply streams
+  messages.value.push({ role: "assistant", content: "", page });
+  const reply = messages.value[messages.value.length - 1]; // reactive proxy
+
   draft.value = "";
   error.value = "";
   failedText.value = "";
   isLoading.value = true;
+  const controller = new AbortController();
+  activeRequest = controller;
   scrollToBottom();
 
   try {
-    const reply = await sendChatMessage(
-      messages.value.map(({ role, content }) => ({ role, content })),
-      { page, context: getChatContext(page) },
-    );
-    messages.value.push({ role: "assistant", content: reply, page });
+    await sendChatMessage(history, {
+      page,
+      context: getChatContext(page),
+      signal: controller.signal,
+      onDelta: (delta) => {
+        reply.content += delta;
+        followStream();
+      },
+    });
+    if (!reply.content) reply.content = "_(No response)_";
   } catch (err) {
-    messages.value.pop();
+    if (controller.signal.aborted) return; // user started a new chat; nothing to restore
+    // Drop the question and its partial reply (always the last two, since sending is
+    // blocked while a reply is in progress) so Retry sends it again cleanly
+    messages.value.splice(-2, 2);
     failedText.value = text;
     error.value = err.message;
   } finally {
-    isLoading.value = false;
-    scrollToBottom();
-    textarea.value?.focus();
+    if (activeRequest === controller) {
+      activeRequest = null;
+      isLoading.value = false;
+      scrollToBottom();
+      textarea.value?.focus();
+    }
   }
 }
 
@@ -261,7 +298,7 @@ const pageLabel = (key) => Object.values(PAGES).find((p) => p.key === key)?.labe
               {{ message.content }}
             </div>
 
-            <div v-else class="flex gap-2.5 self-start">
+            <div v-else-if="message.content" class="flex gap-2.5 self-start">
               <span class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary-foreground dark:text-primary">
                 <SparklesIcon class="size-3.5" />
               </span>
@@ -272,7 +309,7 @@ const pageLabel = (key) => Object.values(PAGES).find((p) => p.key === key)?.labe
           </template>
 
           <!-- Typing -->
-          <div v-if="isLoading" class="flex gap-2.5 self-start" aria-label="Assistant is typing">
+          <div v-if="isWaitingForReply" class="flex gap-2.5 self-start" aria-label="Assistant is typing">
             <span class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary-foreground dark:text-primary">
               <SparklesIcon class="size-3.5" />
             </span>

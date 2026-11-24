@@ -22,6 +22,7 @@ import { Switch } from "@/components/ui/switch";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import DatePicker from "@/components/DatePicker.vue";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Card,
@@ -598,10 +599,9 @@ onUnmounted(() => clearChatContext("details", chatSummary));
                   <FieldLabel for="start-date" class="text-xs">
                     Start Date
                   </FieldLabel>
-                  <Input
+                  <DatePicker
                     id="start-date"
                     v-model="customStartDate"
-                    type="date"
                     :max="customEndDate || todayDateStr"
                     :aria-invalid="isDateRangeInvalid"
                     class="w-full"
@@ -615,10 +615,9 @@ onUnmounted(() => clearChatContext("details", chatSummary));
                   <FieldLabel for="end-date" class="text-xs">
                     End Date
                   </FieldLabel>
-                  <Input
+                  <DatePicker
                     id="end-date"
                     v-model="customEndDate"
-                    type="date"
                     :min="customStartDate"
                     :max="todayDateStr"
                     :aria-invalid="isDateRangeInvalid"

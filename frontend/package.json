@@ -9,7 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@lucide/vue": "^1.52.0",
+    "@internationalized/date": "^3.12.4",
+    "@lucide/vue": "^1.79.0",
     "@tailwindcss/vite": "^4.3.3",
     "@unovis/ts": "^1.6.7",
     "@unovis/vue": "^1.6.7",

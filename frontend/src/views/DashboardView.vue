@@ -188,7 +188,7 @@ const pieData = computed(() => historyTotals.value.devices.filter((d) => d.kWh >
 const pieConfig = computed(() =>
   Object.fromEntries(devices.value.map((d) => [d.key, { label: d.label, color: d.color }])),
 );
-const wholePercent = (p) => `${Math.round(p)}%`;
+const formatPercent = (p) => `${p.toFixed(1)}%`;
 
 const donutTriggers = {
   [VisDonutSelectors.segment]: (d) => {
@@ -206,7 +206,7 @@ const donutTriggers = {
         </div>
         <div class="flex items-center justify-between gap-3 text-muted-foreground">
           <span>Share:</span>
-          <span class="font-mono font-medium text-foreground">${wholePercent(item.percent)}</span>
+          <span class="font-mono font-medium text-foreground">${formatPercent(item.percent)}</span>
         </div>
       </div>`;
   },
@@ -242,7 +242,9 @@ const costAccessors = computed(() => devices.value.map((d) => (b) => b[d.key]));
 const costColors = (_d, i) => devices.value[i]?.color;
 
 const costTriggers = {
-  [VisStackedBarSelectors.bar]: (b) => {
+  [VisStackedBarSelectors.bar]: (d) => {
+    // Unovis binds each bar segment to { datum, index, stackIndex, ... }; unwrap to our row.
+    const b = d?.datum ?? d;
     const rows = devices.value
       .filter((d) => b[d.key] > 0)
       .map(
@@ -576,7 +578,7 @@ onUnmounted(() => clearChatContext("dashboard", chatSummary));
                 <span class="truncate text-muted-foreground">{{ item.label }}</span>
               </div>
               <span class="font-mono font-medium text-foreground shrink-0">
-                {{ wholePercent(item.percent) }}
+                {{ formatPercent(item.percent) }}
               </span>
             </div>
           </div>

@@ -97,16 +97,54 @@ router.post(
 
     const pageKey = typeof page === "string" && PAGE_PROMPTS[page] ? page : "dashboard";
 
+    // The reply is streamed as newline-delimited JSON events:
+    //   {"delta":"text"} ... then {"done":true}, or {"error":"message"} if it fails partway.
+    let stream;
+    let clientGone = false;
+    res.on("close", () => {
+      if (!res.writableEnded) {
+        clientGone = true;
+        stream?.controller.abort(); // stop paying for tokens nobody will read
+      }
+    });
+
     try {
-      const completion = await getClient().chat.completions.create({
+      stream = await getClient().chat.completions.create({
         model: config.openai.model,
         messages: [{ role: "system", content: buildSystemPrompt(pageKey, context) }, ...history],
+        stream: true,
       });
-      return res.json({ reply: completion.choices[0].message.content });
     } catch (error) {
       console.error("Error generating response:", error.message);
-      return res.status(502).json({ error: "Failed to generate response" });
+      if (!clientGone) res.status(502).json({ error: "Failed to generate response" });
+      return;
     }
+    if (clientGone) {
+      stream.controller.abort();
+      return;
+    }
+
+    res.status(200).set({
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "X-Accel-Buffering": "no", // keep reverse proxies (nginx) from holding the stream
+    });
+    res.flushHeaders();
+    const send = (event) => res.write(`${JSON.stringify(event)}\n`);
+
+    try {
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content;
+        if (delta) send({ delta });
+      }
+      send({ done: true });
+    } catch (error) {
+      if (!clientGone) {
+        console.error("Error streaming response:", error.message);
+        send({ error: "The reply was interrupted" });
+      }
+    }
+    res.end();
   },
 );
 
