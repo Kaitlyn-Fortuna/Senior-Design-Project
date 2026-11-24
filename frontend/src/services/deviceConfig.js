@@ -1,5 +1,5 @@
 import { getToken } from "./auth";
-import { saveSavedPortNames } from "./portConfig";
+import { applyDeviceConfig } from "./inputs";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 
@@ -36,14 +36,11 @@ export function putDeviceConfig(config) {
 }
 
 /**
- * Copies the input names from the device config into the local port-name
- * cache that the dashboard and detail pages read from.
+ * Copies input names, colours, enabled flags and pricing from the device
+ * config into the shared store the dashboard and detail pages read from.
  */
 export function cachePortNames(config) {
-  const inputs = config?.inputs ?? {};
-  saveSavedPortNames(
-    [...CURRENT_KEYS, ...VOLTAGE_KEYS].map((k) => inputs[k]?.name ?? ""),
-  );
+  applyDeviceConfig(config);
 }
 
 /** Refresh the cached port names from the server (no-op when logged out). */

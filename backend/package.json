@@ -17,6 +17,7 @@
     "i2c-bus": "^5.2.3",
     "jsonwebtoken": "^9.0.2",
     "onoff": "^6.0.3",
+    "openai": "^7.49.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "passport-jwt": "^4.0.1",

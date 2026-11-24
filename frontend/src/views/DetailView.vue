@@ -2,11 +2,27 @@
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { getUser } from "@/services/auth";
-import { connectSocket } from "@/services/socket";
-import { getDevices, formatDateForInput } from "@/services/deviceData";
+import { allCurrentInputs, enabledCurrentInputs } from "@/services/inputs";
+import { fetchPowerSeries } from "@/services/power";
+import { setChatContext, clearChatContext } from "@/services/chatContext";
+import {
+  formatBucket,
+  formatDateForInput,
+  formatEnergy,
+  formatMoney,
+  formatPower,
+  formatTimestamp,
+} from "@/lib/format";
+import TimeSeriesChart from "@/components/charts/TimeSeriesChart.vue";
+import EnergySelectionCard from "@/components/charts/EnergySelectionCard.vue";
+import SummarizeButton from "@/components/summary/SummarizeButton.vue";
+import SummaryPanel from "@/components/summary/SummaryPanel.vue";
+import { powerProfile, useAiSummary } from "@/composables/useAiSummary";
+import { Switch } from "@/components/ui/switch";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import DatePicker from "@/components/DatePicker.vue";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Card,
@@ -46,14 +62,6 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import {
-  ChartContainer,
-  ChartCrosshair,
-  ChartTooltip,
-  ChartTooltipContent,
-  componentToString,
-} from "@/components/ui/chart";
-import { VisAxis, VisLine, VisXYContainer } from "@unovis/vue";
-import {
   ArrowLeftIcon,
   ArrowUpDownIcon,
   CalendarIcon,
@@ -65,7 +73,9 @@ import {
   ChevronsLeftIcon,
   ChevronsRightIcon,
   FilterIcon,
-  RefreshCwIcon,
+  EyeOffIcon,
+  MousePointerClickIcon,
+  RadioIcon,
   RotateCcwIcon,
   SlidersHorizontalIcon,
 } from "@lucide/vue";
@@ -74,11 +84,28 @@ import { cn } from "@/lib/utils";
 const router = useRouter();
 const user = getUser();
 
-// Devices list - dynamic and loaded with saved port names (ports 0-5)
-const devices = ref(getDevices());
+const AUTO_REFRESH_MS = 15_000;
+const MAX_POINTS = 500;
+
+// ---- Devices ----
+// Disabled inputs are hidden unless "Show disabled sources" is on (for history)
+const showDisabled = ref(false);
+const devices = computed(() =>
+  showDisabled.value ? allCurrentInputs.value : enabledCurrentInputs.value,
+);
+const hiddenCount = computed(
+  () => allCurrentInputs.value.length - enabledCurrentInputs.value.length,
+);
 
 // Selected device keys for filtering (defaults to all devices)
-const selectedDeviceKeys = ref(devices.value.map((d) => d.key));
+const selectedDeviceKeys = ref(allCurrentInputs.value.map((d) => d.key));
+
+// Turning disabled sources on shows them straight away
+watch(showDisabled, (on) => {
+  if (!on) return;
+  const add = allCurrentInputs.value.filter((d) => !d.enabled).map((d) => d.key);
+  selectedDeviceKeys.value = [...new Set([...selectedDeviceKeys.value, ...add])];
+});
 
 // Active devices based on filter selection
 const activeDevices = computed(() =>
@@ -87,16 +114,14 @@ const activeDevices = computed(() =>
 
 function toggleDevice(key) {
   if (selectedDeviceKeys.value.includes(key)) {
-    selectedDeviceKeys.value = selectedDeviceKeys.value.filter(
-      (k) => k !== key,
-    );
+    selectedDeviceKeys.value = selectedDeviceKeys.value.filter((k) => k !== key);
   } else {
     selectedDeviceKeys.value = [...selectedDeviceKeys.value, key];
   }
 }
 
 function selectAllDevices() {
-  selectedDeviceKeys.value = devices.value.map((d) => d.key);
+  selectedDeviceKeys.value = allCurrentInputs.value.map((d) => d.key);
 }
 
 function deselectAllDevices() {
@@ -125,14 +150,9 @@ const isDateRangeInvalid = computed(() => {
 function applyDateShortcut(days) {
   const end = new Date();
   const start = new Date();
-  if (days === 0) {
-    customStartDate.value = formatDateForInput(start);
-    customEndDate.value = formatDateForInput(end);
-  } else {
-    start.setDate(start.getDate() - days);
-    customStartDate.value = formatDateForInput(start);
-    customEndDate.value = formatDateForInput(end);
-  }
+  start.setDate(start.getDate() - days);
+  customStartDate.value = formatDateForInput(start);
+  customEndDate.value = formatDateForInput(end);
 }
 
 // Check if any filters are modified from defaults
@@ -140,7 +160,7 @@ const isFilterModified = computed(() => {
   return (
     customStartDate.value !== defaultStartDate ||
     customEndDate.value !== todayDateStr ||
-    selectedDeviceKeys.value.length !== devices.value.length
+    activeDevices.value.length !== devices.value.length
   );
 });
 
@@ -156,138 +176,118 @@ const activeRangeLabel = computed(() => {
   return `${customStartDate.value} to ${customEndDate.value}`;
 });
 
-// Socket & Query state
-let socket = null;
-const isLoading = ref(false);
-const rawReadings = ref([]);
+// ---- Data ----
+const isLoading = ref(false); // only for a new range, not background refreshes
+const isRefreshing = ref(false);
+const loadError = ref("");
+const series = ref({ points: [], bucketSeconds: null });
+const lastUpdated = ref(null);
+let querySeq = 0;
 
-/**
- * Sends a power:query event with current date range and selected port indices.
- */
-function queryData() {
-  if (!socket || isDateRangeInvalid.value) return;
+// While the range includes today, new readings keep arriving
+const isAutoRefreshing = computed(
+  () => !isDateRangeInvalid.value && customEndDate.value >= formatDateForInput(new Date()),
+);
 
-  const startIso = new Date(`${customStartDate.value}T00:00:00`).toISOString();
-  const endIso = new Date(`${customEndDate.value}T23:59:59.999`).toISOString();
-
-  // Selected ports (e.g. "port0" -> 0)
-  const ports = activeDevices.value.map((d) => d.port);
-
-  isLoading.value = true;
-  socket.emit("power:query", {
-    startDate: startIso,
-    endDate: endIso,
-    ports,
-  });
-}
-
-function handleQueryResult(data) {
-  isLoading.value = false;
-  if (data && Array.isArray(data.readings)) {
-    rawReadings.value = data.readings;
-  } else {
-    rawReadings.value = [];
+async function queryData({ background = false } = {}) {
+  if (isDateRangeInvalid.value) return;
+  const seq = ++querySeq;
+  if (background) isRefreshing.value = true;
+  else isLoading.value = true;
+  try {
+    const result = await fetchPowerSeries({
+      startDate: new Date(`${customStartDate.value}T00:00:00`).toISOString(),
+      endDate: new Date(`${customEndDate.value}T23:59:59.999`).toISOString(),
+      maxPoints: MAX_POINTS,
+    });
+    if (seq !== querySeq) return;
+    series.value = result;
+    loadError.value = "";
+    lastUpdated.value = new Date();
+  } catch (err) {
+    if (seq === querySeq) loadError.value = err.message;
+  } finally {
+    if (seq === querySeq) {
+      isLoading.value = false;
+      isRefreshing.value = false;
+    }
   }
 }
 
-// Automatically re-query when filter criteria change
-watch([customStartDate, customEndDate, selectedDeviceKeys], () => {
+// Re-query when the date range changes (devices are filtered locally)
+watch([customStartDate, customEndDate], () => {
+  selection.value = null;
   queryData();
 });
 
+let refreshTimer = null;
 onMounted(() => {
-  const currentDevices = getDevices();
-  devices.value = currentDevices;
-  if (selectedDeviceKeys.value.length === 0) {
-    selectedDeviceKeys.value = currentDevices.map((d) => d.key);
-  }
-
-  socket = connectSocket();
-  socket.on("power:query_result", handleQueryResult);
-
-  // Initial query with default parameters (last 2 days, all 6 ports)
   queryData();
+  refreshTimer = setInterval(() => {
+    if (isAutoRefreshing.value && !isLoading.value) queryData({ background: true });
+  }, AUTO_REFRESH_MS);
 });
 
-onUnmounted(() => {
-  if (socket) {
-    socket.off("power:query_result", handleQueryResult);
-  }
-});
+onUnmounted(() => clearInterval(refreshTimer));
 
-// Parse backend readings into structured chart & table points
-const timeSeriesData = computed(() => {
-  return rawReadings.value.map((reading, index) => {
-    const pointTime = new Date(reading.timestamp);
-    const dateStr = pointTime.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
-    const timeStr = pointTime.toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    const formattedTime = `${dateStr}, ${timeStr}`;
+const lastUpdatedLabel = computed(() =>
+  lastUpdated.value ? formatTimestamp(lastUpdated.value.getTime(), { seconds: true, date: false }) : "",
+);
 
+// Parse backend buckets into chart & table points (power in W)
+const timeSeriesData = computed(() =>
+  series.value.points.map((p, index) => {
+    const t = Date.parse(p.timestamp);
     const point = {
       index,
-      id: reading.id,
-      timestamp: pointTime.getTime(),
-      formattedTime,
-      dateStr,
-      timeStr,
+      t,
+      timestamp: t,
+      formattedTime: formatTimestamp(t, { seconds: (series.value.bucketSeconds ?? 60) < 60 }),
     };
+    let total = 0;
+    let energyWh = 0;
+    let cost = 0;
+    for (const d of devices.value) point[d.key] = p.ports[d.port];
+    for (const d of activeDevices.value) {
+      total += p.ports[d.port];
+      energyWh += p.energyWh[d.port];
+      cost += p.cost[d.port];
+    }
+    return { ...point, total, energyWh, cost };
+  }),
+);
 
-    devices.value.forEach((device) => {
-      const portWatt = reading.ports?.[device.port] ?? 0;
-      point[device.key] = Number((portWatt / 1000).toFixed(2));
-    });
+const bucketLabel = computed(() => formatBucket(series.value.bucketSeconds));
 
-    const activeTotalWatts = activeDevices.value.reduce(
-      (sum, d) => sum + (reading.ports?.[d.port] ?? 0),
-      0,
-    );
-    point.total = Number((activeTotalWatts / 1000).toFixed(2));
-
-    return point;
+// Totals over the whole range for the selected devices
+const rangeTotals = computed(() => {
+  const perDevice = activeDevices.value.map((d) => {
+    let wh = 0;
+    let cost = 0;
+    let peak = 0;
+    for (const p of series.value.points) {
+      wh += p.energyWh[d.port];
+      cost += p.cost[d.port];
+      peak = Math.max(peak, p.ports[d.port]);
+    }
+    return { ...d, kWh: wh / 1000, cost, peakW: peak };
   });
+  let peak = null;
+  for (const p of timeSeriesData.value) if (!peak || p.total > peak.total) peak = p;
+  return {
+    kWh: perDevice.reduce((s, d) => s + d.kWh, 0),
+    cost: perDevice.reduce((s, d) => s + d.cost, 0),
+    peak,
+    devices: perDevice,
+  };
 });
 
-// Dynamic Chart Configuration based ONLY on active devices
-const chartConfig = computed(() => {
-  const config = {};
-  activeDevices.value.forEach((device) => {
-    config[device.key] = {
-      label: device.label,
-      color: device.color,
-    };
-  });
-  return config;
+// ---- Drag-to-select on the chart ----
+const selection = ref(null);
+const selectionResult = ref(null);
+watch(selection, (s) => {
+  if (!s) selectionResult.value = null;
 });
-
-// Calculate tick indices for X-axis (approx 6 ticks across the range)
-const tickIndices = computed(() => {
-  const len = timeSeriesData.value.length;
-  if (len === 0) return [];
-  const count = 6;
-  const step = Math.max(1, Math.floor((len - 1) / (count - 1)));
-  const ticks = [];
-  for (let i = 0; i < count - 1; i++) {
-    ticks.push(i * step);
-  }
-  ticks.push(len - 1);
-  return ticks;
-});
-
-// Format tick labels based on current time span
-function formatXTick(val) {
-  const point = timeSeriesData.value[val];
-  if (!point) return "";
-  if (customStartDate.value === customEndDate.value) {
-    return point.timeStr;
-  }
-  return `${point.dateStr} ${point.timeStr}`;
-}
 
 // Table sort order (default: newest first for intuitive inspection)
 const sortOrder = ref("desc"); // 'asc' or 'desc'
@@ -303,15 +303,6 @@ const sortedTableData = computed(() => {
   }
   return copy;
 });
-
-// Calculate row total dynamically from only active devices
-function getRowTotal(row) {
-  const sum = activeDevices.value.reduce(
-    (acc, device) => acc + (Number(row[device.key]) || 0),
-    0,
-  );
-  return Number(sum.toFixed(2));
-}
 
 // Pagination state
 const pageSize = ref(20);
@@ -330,6 +321,11 @@ const paginatedTableData = computed(() => {
 // Sync pageInput when currentPage changes
 watch(currentPage, (val) => {
   pageInput.value = val;
+});
+
+// Keep the page in range when a refresh changes the row count
+watch(totalPages, (n) => {
+  if (currentPage.value > n) currentPage.value = n;
 });
 
 // Reset page when any filter changes
@@ -369,6 +365,55 @@ function nextPage() {
     currentPage.value++;
   }
 }
+
+// ---- Chat assistant summary ----
+const round = (n, d = 2) => +Number(n || 0).toFixed(d);
+
+function chatSummary() {
+  const t = rangeTotals.value;
+  return {
+    page: "Details",
+    dateRange: { start: customStartDate.value, end: customEndDate.value },
+    readingsAveragedInto: bucketLabel.value ? `${bucketLabel.value} intervals` : null,
+    intervalsShown: timeSeriesData.value.length,
+    showingDisabledSources: showDisabled.value,
+    hiddenDisabledSources: showDisabled.value ? [] : allCurrentInputs.value.filter((d) => !d.enabled).map((d) => d.label),
+    selectedDevices: activeDevices.value.map((d) => d.label + (d.enabled ? "" : " (disabled)")),
+    unselectedDevices: devices.value.filter((d) => !selectedDeviceKeys.value.includes(d.key)).map((d) => d.label),
+    rangeTotals: {
+      kWh: round(t.kWh, 4),
+      cost: round(t.cost, 4),
+      peakTotalW: t.peak ? round(t.peak.total, 1) : null,
+      peakAt: t.peak ? t.peak.formattedTime : null,
+    },
+    byDevice: t.devices.map((d) => ({
+      name: d.label,
+      kWh: round(d.kWh, 4),
+      cost: round(d.cost, 4),
+      peakW: round(d.peakW, 1),
+      percentOfEnergy: t.kWh > 0 ? Math.round((d.kWh / t.kWh) * 100) : 0,
+    })),
+    chartSelection: selectionResult.value,
+  };
+}
+
+onMounted(() => setChatContext("details", chatSummary));
+
+// ---- Inline "Summarize" for the chosen range ----
+const rangeSummary = useAiSummary("details-range", () => {
+  const { chartSelection, ...rest } = chatSummary();
+  return {
+    ...rest,
+    profileWatts: powerProfile(timeSeriesData.value, activeDevices.value.map((d) => d.key), {
+      max: 48,
+      labelFor: (k) => devices.value.find((d) => d.key === k)?.label ?? k,
+    }),
+  };
+});
+
+// A different range or set of devices makes the old summary wrong
+watch([customStartDate, customEndDate, selectedDeviceKeys, showDisabled], () => rangeSummary.dismiss());
+onUnmounted(() => clearChatContext("details", chatSummary));
 </script>
 
 <template>
@@ -395,8 +440,8 @@ function nextPage() {
           Power Usage Details
         </h1>
         <p class="text-sm text-muted-foreground m-0">
-          15-minute interval power consumption analysis with customizable date
-          ranges and device filters.
+          Power, energy and cost per device for any date range. Drag across
+          the chart to total up a time window.
         </p>
       </div>
     </header>
@@ -421,17 +466,19 @@ function nextPage() {
             </div>
 
             <div class="flex items-center gap-2 self-start sm:self-auto">
-              <!-- Rerun Report Button (Always visible regardless of collapse state) -->
-              <Button
-                variant="default"
-                size="sm"
-                :disabled="isLoading || isDateRangeInvalid"
-                @click="queryData"
+              <!-- Auto-update status (no manual refresh needed) -->
+              <span
+                v-if="isAutoRefreshing"
+                class="flex items-center gap-1.5 text-xs text-muted-foreground"
+                aria-live="polite"
               >
-                <Spinner v-if="isLoading" class="size-3.5" />
-                <RefreshCwIcon v-else data-icon="inline-start" />
-                Refresh
-              </Button>
+                <Spinner v-if="isRefreshing" class="size-3.5 text-primary" />
+                <RadioIcon v-else class="size-3.5 text-green-600 dark:text-green-400" />
+                Auto-updating<template v-if="lastUpdatedLabel"> · {{ lastUpdatedLabel }}</template>
+              </span>
+              <span v-else-if="lastUpdatedLabel" class="text-xs text-muted-foreground">
+                Past range · loaded {{ lastUpdatedLabel }}
+              </span>
 
               <Button
                 v-if="isFilterModified"
@@ -552,10 +599,9 @@ function nextPage() {
                   <FieldLabel for="start-date" class="text-xs">
                     Start Date
                   </FieldLabel>
-                  <Input
+                  <DatePicker
                     id="start-date"
                     v-model="customStartDate"
-                    type="date"
                     :max="customEndDate || todayDateStr"
                     :aria-invalid="isDateRangeInvalid"
                     class="w-full"
@@ -569,10 +615,9 @@ function nextPage() {
                   <FieldLabel for="end-date" class="text-xs">
                     End Date
                   </FieldLabel>
-                  <Input
+                  <DatePicker
                     id="end-date"
                     v-model="customEndDate"
-                    type="date"
                     :min="customStartDate"
                     :max="todayDateStr"
                     :aria-invalid="isDateRangeInvalid"
@@ -605,6 +650,17 @@ function nextPage() {
                 </div>
 
                 <div class="flex items-center gap-2 text-xs">
+                  <label
+                    for="show-disabled"
+                    class="flex items-center gap-2 font-medium cursor-pointer select-none text-muted-foreground"
+                    :title="hiddenCount === 0 ? 'No inputs are disabled' : 'Show inputs that are turned off in Setup'"
+                  >
+                    <EyeOffIcon class="size-3.5" />
+                    Show disabled sources
+                    <Badge v-if="hiddenCount > 0" variant="secondary" class="font-mono px-1.5">{{ hiddenCount }}</Badge>
+                    <Switch id="show-disabled" v-model="showDisabled" :disabled="hiddenCount === 0" />
+                  </label>
+                  <Separator orientation="vertical" class="h-3" />
                   <Button
                     variant="ghost"
                     size="xs"
@@ -653,6 +709,13 @@ function nextPage() {
                   >
                     Port {{ device.port }}
                   </Badge>
+                  <Badge
+                    v-if="!device.enabled"
+                    variant="secondary"
+                    class="px-1 py-0 text-[10px] leading-none"
+                  >
+                    Disabled
+                  </Badge>
                   <CheckIcon
                     v-if="selectedDeviceKeys.includes(device.key)"
                     class="size-3 text-primary shrink-0 ml-0.5"
@@ -675,8 +738,8 @@ function nextPage() {
           <div>
             <CardTitle>Device Power Usage Trends</CardTitle>
             <CardDescription>
-              Power trends over time on 15-minute increments for selected
-              devices.
+              Average power per device<template v-if="bucketLabel">
+                in {{ bucketLabel }} intervals</template>.
             </CardDescription>
           </div>
           <div class="flex items-center gap-2 self-start sm:self-auto">
@@ -690,6 +753,12 @@ function nextPage() {
             <Badge variant="secondary" class="font-mono">
               {{ timeSeriesData.length }} data points
             </Badge>
+            <SummarizeButton
+              v-if="!isLoading && activeDevices.length && timeSeriesData.length"
+              label="Summarize range"
+              :loading="rangeSummary.loading.value"
+              @click="rangeSummary.generate()"
+            />
           </div>
         </CardHeader>
         <CardContent class="flex flex-col gap-4">
@@ -703,6 +772,13 @@ function nextPage() {
               Loading power data from server...
             </p>
           </div>
+
+          <p
+            v-else-if="loadError && timeSeriesData.length === 0"
+            class="h-72 flex items-center justify-center text-sm text-destructive border border-dashed border-border rounded-lg"
+          >
+            {{ loadError }}
+          </p>
 
           <!-- Empty State when no devices are selected -->
           <Empty
@@ -749,46 +825,41 @@ function nextPage() {
 
           <!-- Multi-Line Chart Container -->
           <template v-else>
-            <ChartContainer
-              :config="chartConfig"
-              :cursor="true"
+            <TimeSeriesChart
+              v-model:selection="selection"
+              :data="timeSeriesData"
+              :series="activeDevices"
+              :y-format="formatPower"
+              selectable
+              show-total
               class="w-full h-80 min-h-[300px]"
-            >
-              <VisXYContainer
-                :data="timeSeriesData"
-                :margin="{ top: 16, right: 20, bottom: 32, left: 40 }"
-              >
-                <!-- Multi-line chart: Line for each ACTIVE device -->
-                <VisLine
-                  v-for="device in activeDevices"
-                  :key="device.key"
-                  :x="(d) => d.index"
-                  :y="(d) => d[device.key]"
-                  :color="device.color"
-                  :line-width="2"
-                />
-                <VisAxis
-                  type="x"
-                  :tick-values="tickIndices"
-                  :tick-format="formatXTick"
-                  :grid-line="false"
-                />
-                <VisAxis
-                  type="y"
-                  :num-ticks="5"
-                  :tick-format="(val) => `${val} kW`"
-                />
-                <ChartCrosshair
-                  :template="
-                    componentToString(chartConfig, ChartTooltipContent, {
-                      labelKey: 'formattedTime',
-                    })
-                  "
-                  :color="() => 'var(--primary)'"
-                />
-                <ChartTooltip />
-              </VisXYContainer>
-            </ChartContainer>
+            />
+
+            <SummaryPanel :summary="rangeSummary" :title="`${activeRangeLabel} · ${activeDevices.length} devices`" />
+
+            <EnergySelectionCard
+              v-if="selection"
+              :selection="selection"
+              :points="timeSeriesData"
+              :devices="activeDevices"
+              @clear="selection = null"
+              @result="selectionResult = $event"
+            />
+            <div v-else class="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+              <span class="flex items-center gap-1.5">
+                <MousePointerClickIcon class="size-3.5" />
+                Drag across the chart to see the energy and cost for that time.
+              </span>
+              <span>
+                Range total:
+                <strong class="text-foreground">{{ formatEnergy(rangeTotals.kWh) }}</strong>
+                ·
+                <strong class="text-foreground">{{ formatMoney(rangeTotals.cost) }}</strong>
+                <template v-if="rangeTotals.peak">
+                  · peak {{ formatPower(rangeTotals.peak.total) }} at {{ rangeTotals.peak.formattedTime }}
+                </template>
+              </span>
+            </div>
 
             <!-- Interactive Device Legend (Clicking any legend item toggles it) -->
             <div
@@ -835,8 +906,8 @@ function nextPage() {
           <div>
             <CardTitle>Readings Data Table</CardTitle>
             <CardDescription>
-              15-minute interval power consumption for currently active devices
-              matching the chart.
+              Average power<template v-if="bucketLabel"> per {{ bucketLabel }} interval</template>,
+              with the energy used and its cost, for the devices shown on the chart.
             </CardDescription>
           </div>
           <div class="flex items-center gap-2">
@@ -867,8 +938,14 @@ function nextPage() {
                         <span>{{ device.label }}</span>
                       </div>
                     </TableHead>
-                    <TableHead class="text-right font-semibold min-w-28"
-                      >Total (kW)</TableHead
+                    <TableHead class="text-right font-semibold min-w-24"
+                      >Total</TableHead
+                    >
+                    <TableHead class="text-right font-semibold min-w-24"
+                      >Energy</TableHead
+                    >
+                    <TableHead class="text-right font-semibold min-w-20"
+                      >Cost</TableHead
                     >
                   </TableRow>
                 </TableHeader>
@@ -888,20 +965,26 @@ function nextPage() {
                       :key="device.key"
                       class="text-right font-mono text-muted-foreground"
                     >
-                      {{ row[device.key] }} kW
+                      {{ formatPower(row[device.key]) }}
                     </TableCell>
                     <!-- Row total summing active devices -->
                     <TableCell
                       class="text-right font-mono font-medium text-foreground"
                     >
-                      {{ getRowTotal(row) }} kW
+                      {{ formatPower(row.total) }}
+                    </TableCell>
+                    <TableCell class="text-right font-mono text-muted-foreground">
+                      {{ formatEnergy(row.energyWh / 1000) }}
+                    </TableCell>
+                    <TableCell class="text-right font-mono text-muted-foreground">
+                      {{ formatMoney(row.cost) }}
                     </TableCell>
                   </TableRow>
 
                   <!-- Loading state for table -->
                   <TableRow v-if="isLoading">
                     <TableCell
-                      :colspan="activeDevices.length + 2"
+                      :colspan="activeDevices.length + 4"
                       class="h-28 text-center text-muted-foreground"
                     >
                       <div class="flex items-center justify-center gap-2">
@@ -914,7 +997,7 @@ function nextPage() {
                   <!-- Empty state for no active devices -->
                   <TableRow v-else-if="activeDevices.length === 0">
                     <TableCell
-                      :colspan="devices.length + 2"
+                      :colspan="devices.length + 4"
                       class="h-28 text-center text-muted-foreground"
                     >
                       No devices selected. Select at least one device in the
@@ -925,7 +1008,7 @@ function nextPage() {
                   <!-- Empty state for no data rows -->
                   <TableRow v-else-if="paginatedTableData.length === 0">
                     <TableCell
-                      :colspan="activeDevices.length + 2"
+                      :colspan="activeDevices.length + 4"
                       class="h-24 text-center text-muted-foreground"
                     >
                       No data available for this range.

@@ -28,8 +28,9 @@ export const config = {
     port: Number(process.env.PGPORT) || 5432,
     database: process.env.PGDATABASE || 'postgres',
   },
-  serial: {
-    path: process.env.SERIAL_PORT || '',
-    baudRate: Number(process.env.SERIAL_BAUD) || 9600,
-  },
+  
+  openai: {
+    apiKey: process.env.OPENAI_KEY || '',
+    model: process.env.OPENAI_MODEL || '',
+  }
 };

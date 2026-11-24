@@ -36,6 +36,7 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   CloudOffIcon,
+  DollarSignIcon,
   GaugeIcon,
   RefreshCwIcon,
   SettingsIcon,
@@ -45,6 +46,7 @@ import InputConfigCard from "@/components/setup/InputConfigCard.vue";
 import InputAdvancedDialog from "@/components/setup/InputAdvancedDialog.vue";
 import ConfigNumberField from "@/components/setup/ConfigNumberField.vue";
 import ConfigSelectField from "@/components/setup/ConfigSelectField.vue";
+import { setChatContext, clearChatContext } from "@/services/chatContext";
 
 const router = useRouter();
 const user = getUser();
@@ -274,6 +276,32 @@ const enabledCount = (keys) =>
   keys.filter((k) => config.value?.inputs[k].enabled).length;
 
 const err = (key) => fieldErrors.value[key] || "";
+
+// ---- Chat assistant summary ----
+function chatSummary() {
+  if (!config.value) return { page: "Setup", status: isLoading.value ? "loading" : loadError.value };
+  const c = config.value;
+  const pick = (k, fields) =>
+    Object.fromEntries([["name", displayName(k)], ["enabled", c.inputs[k].enabled], ...fields.map((f) => [f, c.inputs[k][f]])]);
+  return {
+    page: "Setup",
+    saveStatus: saveState.value,
+    validationErrors: Object.entries(fieldErrors.value).map(([k, v]) => `${k}: ${v}`),
+    pricePerKwh: c.pricing?.price_per_kwh,
+    currentInputs: Object.fromEntries(
+      CURRENT_KEYS.map((k) => [k, pick(k, ["voltage_sensor", "ct_ratio", "ct_burden_ohms", "turns", "gain", "calibration"])]),
+    ),
+    voltageInputs: Object.fromEntries(
+      VOLTAGE_KEYS.map((k) => [k, pick(k, ["transformer_input_v", "transformer_output_v", "divider_ratio", "gain", "calibration"])]),
+    ),
+    adc: c.adc,
+    database: c.database,
+    leds: c.leds,
+    restartRequired: adcChanged.value,
+  };
+}
+onMounted(() => setChatContext("setup", chatSummary));
+onBeforeUnmount(() => clearChatContext("setup", chatSummary));
 const errorCount = computed(() => Object.keys(fieldErrors.value).length);
 </script>
 
@@ -428,6 +456,33 @@ const errorCount = computed(() => Object.keys(fieldErrors.value).length);
               />
             </div>
           </section>
+        </CardContent>
+      </Card>
+
+      <!-- Electricity price -->
+      <Card class="w-full">
+        <CardHeader>
+          <div class="flex items-center gap-2">
+            <DollarSignIcon class="size-5 text-muted-foreground" />
+            <CardTitle>Electricity Price</CardTitle>
+          </div>
+          <CardDescription>
+            Saved with every reading and used for all cost numbers. Find it on
+            your utility bill (total charge per kWh).
+          </CardDescription>
+        </CardHeader>
+        <CardContent class="max-w-xs">
+          <ConfigNumberField
+            id="pricing-price_per_kwh"
+            v-model="config.pricing.price_per_kwh"
+            label="Price"
+            unit="$/kWh"
+            step="0.01"
+            :min="0"
+            :max="10"
+            hint="Typical US homes pay $0.10–$0.30 per kWh"
+            :error="err('pricing price_per_kwh')"
+          />
         </CardContent>
       </Card>
 

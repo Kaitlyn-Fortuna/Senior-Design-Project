@@ -3,6 +3,7 @@
     "v0": {
       "enabled": true,
       "name": "Leg 1",
+      "color": "#eab308",
       "transformer_input_v": 120,
       "transformer_output_v": 10.4,
       "divider_ratio": 23,
@@ -12,6 +13,7 @@
     "v1": {
       "enabled": true,
       "name": "Leg 2",
+      "color": "#6366f1",
       "transformer_input_v": 120,
       "transformer_output_v": 10.4,
       "divider_ratio": 23,
@@ -21,6 +23,7 @@
     "c0": {
       "enabled": true,
       "name": "Current Clamp 1",
+      "color": "#84cc16",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
       "turns": 1,
@@ -31,6 +34,7 @@
     "c1": {
       "enabled": true,
       "name": "Current Clamp 2",
+      "color": "#0ea5e9",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
       "turns": 1,
@@ -41,6 +45,7 @@
     "c2": {
       "enabled": true,
       "name": "Current Clamp 3",
+      "color": "#f97316",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
       "turns": 1,
@@ -51,6 +56,7 @@
     "c3": {
       "enabled": true,
       "name": "Current Clamp 4",
+      "color": "#a855f7",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
       "turns": 1,
@@ -61,6 +67,7 @@
     "c4": {
       "enabled": true,
       "name": "Current Clamp 5",
+      "color": "#ef4444",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
       "turns": 1,
@@ -71,6 +78,7 @@
     "c5": {
       "enabled": true,
       "name": "Current Clamp 6",
+      "color": "#14b8a6",
       "ct_ratio": 2400,
       "ct_burden_ohms": 10,
       "turns": 1,
@@ -78,6 +86,9 @@
       "gain": 4,
       "calibration": 1.0
     }
+  },
+  "pricing": {
+    "price_per_kwh": 0.15
   },
   "adc": {
     "oversampling_ratio": 1024,

@@ -4,6 +4,7 @@ import {watch} from "vue";
 import { useRoute } from "vue-router";
 import { getToken } from "./services/auth";
 import { connectSocket } from "./services/socket";
+import ChatWidget from "./components/ChatWidget.vue";
 
 const route = useRoute();
 
@@ -22,4 +23,5 @@ watch(
 
 <template>
   <router-view />
+  <ChatWidget v-if="route.meta.requiresAuth" />
 </template>

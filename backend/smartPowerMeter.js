@@ -78,6 +78,7 @@ let dbMinVoltage = 0; // Voltages below this are saved as 0
 let dbMinCurrent = 0; // Currents below this are saved as 0
 let dbMinPower = 0; // Real powers below this are saved as 0
 let dbInsertIntervalSeconds = 1; // How often to write a row to the database
+let pricePerKwh = 0; // Electricity price saved with each row ($/kWh)
 applySettingsFromConfig(deviceConfig);
 
 function applySettingsFromConfig(config) {
@@ -96,6 +97,7 @@ function applySettingsFromConfig(config) {
   dbMinCurrent = config.database.min_current;
   dbMinPower = config.database.min_power;
   dbInsertIntervalSeconds = config.database.insert_seconds;
+  pricePerKwh = config.pricing.price_per_kwh;
 }
 
 // ---------------------------------------------------------------------------
@@ -514,7 +516,7 @@ function saveToDb() {
     powerFactors.push(powerFactor);
   }
 
-  insertRecord(currents, voltages, apparentPowers, realPowers, powerFactors).catch((e) =>
+  insertRecord(currents, voltages, apparentPowers, realPowers, powerFactors, pricePerKwh).catch((e) =>
     console.error("DB insert failed:", e.message),
   );
   resetDbInterval();

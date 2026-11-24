@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { SlidersHorizontalIcon } from "@lucide/vue";
 import { cn } from "@/lib/utils";
+import { DEFAULT_COLORS } from "@/services/inputs";
 
 /**
  * One input from device-configuration.json (c0-c5 or v0-v1).
@@ -21,6 +22,15 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["advanced"]);
+
+// Colour used for this input on every chart
+const color = computed({
+  get: () => props.input.color || DEFAULT_COLORS[props.inputKey],
+  set: (value) => {
+    // eslint-disable-next-line vue/no-mutating-props
+    props.input.color = value;
+  },
+});
 
 const err = (field) => props.errors[`${props.inputKey} ${field}`] || "";
 const id = (field) => `${props.inputKey}-${field}`;
@@ -46,9 +56,29 @@ const advancedErrorCount = computed(
     "
   >
     <div class="flex items-center justify-between gap-3">
-      <Badge variant="outline" class="font-mono font-semibold">
-        {{ props.inputKey.toUpperCase() }}
-      </Badge>
+      <div class="flex items-center gap-2">
+        <Badge variant="outline" class="font-mono font-semibold">
+          {{ props.inputKey.toUpperCase() }}
+        </Badge>
+        <label
+          :for="id('color')"
+          class="relative flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer"
+          title="Colour used for this input on every chart"
+        >
+          <span
+            class="size-5 rounded-md border border-border shadow-xs"
+            :style="{ backgroundColor: color }"
+          />
+          Colour
+          <input
+            :id="id('color')"
+            v-model="color"
+            type="color"
+            class="absolute inset-0 opacity-0 cursor-pointer"
+            :aria-label="`Colour for ${props.inputKey.toUpperCase()}`"
+          />
+        </label>
+      </div>
       <label
         :for="id('enabled')"
         class="flex items-center gap-2 text-xs font-medium cursor-pointer select-none"

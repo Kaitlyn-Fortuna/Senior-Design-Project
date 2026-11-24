@@ -99,7 +99,9 @@ export const retrieveRecordByPKey = async (pKeyInt) =>{
 
 export const retrieveNewestRecord = async () =>{
     const query = {
-        text: 'SELECT * FROM powerdata ORDER BY tstamp DESC LIMIT 1'
+        text: `SELECT *, powerprice::numeric AS price,
+            EXTRACT(EPOCH FROM (LOCALTIMESTAMP - tstamp)) AS age_seconds
+            FROM powerdata ORDER BY tstamp DESC LIMIT 1`
     };
 
     //do the query
@@ -131,8 +133,9 @@ export const retrieveRecentRecords = async ( limit = 48) => {
     const safeLimit = Math.min(Math.max(Number(limit) || 48, 1), 200);
 
     const query = {
-        text: 
-        'SELECT * FROM powerdata ORDER BY tstamp DESC LIMIT $1',
+        text: `SELECT *, powerprice::numeric AS price,
+            EXTRACT(EPOCH FROM (LOCALTIMESTAMP - tstamp)) AS age_seconds
+            FROM powerdata ORDER BY tstamp DESC LIMIT $1`,
         values: [safeLimit]
     };
 

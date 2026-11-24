@@ -13,6 +13,18 @@ export const VOLTAGE_KEYS = ["v0", "v1"];
 export const VALID_GAINS = [1, 2, 4, 8, 16, 32, 64, 128];
 export const VALID_OSR = [128, 256, 512, 1024, 2048, 4096, 8192, 16256];
 
+// Default colour for each input (hex so it works with <input type="color">)
+export const DEFAULT_COLORS = {
+  c0: "#84cc16",
+  c1: "#0ea5e9",
+  c2: "#f97316",
+  c3: "#a855f7",
+  c4: "#ef4444",
+  c5: "#14b8a6",
+  v0: "#eab308",
+  v1: "#6366f1",
+};
+
 // Defaults
 const DEFAULT_VOLTAGE = {
   enabled: true,
@@ -37,9 +49,14 @@ const DEFAULT_CURRENT = {
 
 export const DEFAULTS = {
   inputs: {
-    ...Object.fromEntries(VOLTAGE_KEYS.map((k) => [k, { ...DEFAULT_VOLTAGE }])),
-    ...Object.fromEntries(CURRENT_KEYS.map((k) => [k, { ...DEFAULT_CURRENT }])),
+    ...Object.fromEntries(
+      VOLTAGE_KEYS.map((k) => [k, { ...DEFAULT_VOLTAGE, color: DEFAULT_COLORS[k] }]),
+    ),
+    ...Object.fromEntries(
+      CURRENT_KEYS.map((k) => [k, { ...DEFAULT_CURRENT, color: DEFAULT_COLORS[k] }]),
+    ),
   },
+  pricing: { price_per_kwh: 0.15 },
   adc: { oversampling_ratio: 1024, report_seconds: 1 },
   database: {
     insert_seconds: 1,
@@ -104,6 +121,15 @@ function bool(errors, label, value, fallback) {
   return value;
 }
 
+function color(errors, label, value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string" || !/^#[0-9a-f]{6}$/i.test(value)) {
+    errors.push(`${label} must be a hex colour like #84cc16`);
+    return fallback;
+  }
+  return value.toLowerCase();
+}
+
 function choice(errors, label, value, fallback, options) {
   if (value === undefined || value === null) return fallback;
   if (!options.includes(value)) {
@@ -118,6 +144,7 @@ function validateVoltage(errors, key, input = {}) {
   return {
     enabled: bool(errors, `${key} enabled`, input.enabled, d.enabled),
     name: text(errors, `${key} name`, input.name),
+    color: color(errors, `${key} color`, input.color, DEFAULT_COLORS[key]),
     transformer_input_v: num(
       errors,
       `${key} transformer_input_v`,
@@ -157,6 +184,7 @@ function validateCurrent(errors, key, input = {}) {
   return {
     enabled: bool(errors, `${key} enabled`, input.enabled, d.enabled),
     name: text(errors, `${key} name`, input.name),
+    color: color(errors, `${key} color`, input.color, DEFAULT_COLORS[key]),
     ct_ratio: num(errors, `${key} ct_ratio`, input.ct_ratio, d.ct_ratio, {
       min: 1,
       max: 100000,
@@ -266,6 +294,16 @@ export function validateDeviceConfig(src = {}) {
     ),
   };
 
+  const pricing = {
+    price_per_kwh: num(
+      errors,
+      "pricing price_per_kwh",
+      src.pricing?.price_per_kwh,
+      DEFAULTS.pricing.price_per_kwh,
+      { min: 0, max: 10 },
+    ),
+  };
+
   const enabledVoltages = VOLTAGE_KEYS.filter((k) => inputs[k].enabled);
   if (enabledVoltages.length > 0) {
     for (const k of CURRENT_KEYS) {
@@ -275,7 +313,7 @@ export function validateDeviceConfig(src = {}) {
     }
   }
 
-  return { config: { inputs, adc, database, leds }, errors };
+  return { config: { inputs, pricing, adc, database, leds }, errors };
 }
 
 export function ampsPerVolt(cfg, key) {
