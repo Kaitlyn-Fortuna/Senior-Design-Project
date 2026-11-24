@@ -81,6 +81,48 @@ export const insertRecord = async (currents = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], vo
     return result;
 }
 
+insertRandomRecord = async () => {
+    insertRecord(
+        //current
+        [(Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100)],
+        //voltage
+        [(Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100)],
+        //apparent power
+        [(Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100)],
+        //real power
+        [(Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100)],
+        //power factor
+        [(Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100),
+        (Math.random() * 100)],
+        //power price
+        (Math.random() * 100)
+    );
+}
+
 export const retrieveRecordByPKey = async (pKeyInt) =>{
     const query = {
         text: 'SELECT * FROM powerdata WHERE pkey = $1',

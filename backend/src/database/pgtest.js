@@ -21,19 +21,10 @@ const result2 = await db.query(query2);
 console.log(result1.rows[0]);
 console.log(result2.rows[0]);
 */
-accessMethods.insertRecord([(Math.random() * 100),
-                            (Math.random() * 100),
-                            (Math.random() * 100),
-                            (Math.random() * 100),
-                            (Math.random() * 100),
-                            (Math.random() * 100)],
-                            [(Math.random() * 100), (Math.random() * 100)],
-                            [0, 1, 0, 1, 0, 1],
-                            (Math.random() * 100)
-);
+accessMethods.insertRandomRecord();
 
-//accessMethods.retrieveRecordByPKey(1);
+accessMethods.retrieveRecordByPKey(1);
 
 accessMethods.retrieveNewestRecord();
 
-//accessMethods.retrieveAllRecords();
+accessMethods.retrieveAllRecords();
